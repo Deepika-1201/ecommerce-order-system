@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Phase | 2 — High-level design |
-| Status | Proposed, for architecture approval |
+| Status | Approved 2026-10-02 |
 | Related | [Architecture §12](architecture.md#12-event-architecture) · [ADR-006 Kafka](decisions/ADR-006-kafka.md) · [ADR-008 Outbox](decisions/ADR-008-transactional-outbox.md) · [ADR-010 Idempotency](decisions/ADR-010-idempotency.md) · [ADR-011 Versioning](decisions/ADR-011-event-versioning.md) |
 
 ## 1. Kinds of message

@@ -1,6 +1,6 @@
 # ADR-006: Kafka as the event broker
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [ADR-001](ADR-001-ecosystem-boundaries.md) (rule 4: the broker carries facts, the scheduler carries tasks), [ADR-008](ADR-008-transactional-outbox.md), [event model](../event-model.md)
 

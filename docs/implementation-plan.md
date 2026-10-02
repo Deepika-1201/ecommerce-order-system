@@ -15,7 +15,7 @@ Builds the design in [architecture.md](architecture.md) incrementally, one verti
 
 | # | Phase | Scope | Exit criteria | Status |
 |---|---|---|---|---|
-| 0 | Design | Requirements, domain model, order lifecycle, HLD, consistency, failure handling, event model, ADR-001 to ADR-014 | Architecture approved | In review |
+| 0 | Design | Requirements, domain model, order lifecycle, HLD, consistency, failure handling, event model, ADR-001 to ADR-014 | Architecture approved | Done (approved 2026-10-02) |
 | 1 | Scaffolding | Gradle (Kotlin DSL), Java 25, Spring Boot 4.1; module skeletons with a boundary test; configuration; health and readiness; JSON logs; problem+json errors; container image; `docker compose` (PostgreSQL, Kafka, Keycloak, Mailpit, MinIO, Grafana LGTM); GitHub Actions | `./gradlew build` green in CI; the app starts in both roles; a forbidden module dependency fails the build | |
 | 2 | Platform | Outbox with lanes, dispatcher and relay (`NOTIFY` plus polling); processed messages; idempotency keys; audit log; `TaskScheduler` port with its in-process adapter | Crash-between-steps tests: no lost and no duplicated effects | |
 | 3 | Catalog and customers | Products, variants, categories, prices, image upload through pre-signed URLs; customer profiles and addresses; OIDC resource server and roles | API tests, including cross-customer access being refused | |

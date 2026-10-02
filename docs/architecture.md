@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Phase | 2 — High-level design |
-| Status | Proposed, for architecture approval |
+| Status | Approved 2026-10-02 |
 | Inputs | [Requirements](requirements.md) (approved 2026-10-02) · [Domain model](domain-model.md) · [Order lifecycle](order-lifecycle.md) |
 | Detail | [Consistency model](consistency-model.md) · [Failure handling](failure-handling.md) · [Event model](event-model.md) · [Decisions](decisions/README.md) · [Implementation plan](implementation-plan.md) |
 

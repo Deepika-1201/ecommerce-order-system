@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Phase | 2 — Consistency and failure analysis |
-| Status | Proposed, for architecture approval |
+| Status | Approved 2026-10-02 |
 | Related | [Architecture §14](architecture.md#14-consistency-model) · [Failure handling](failure-handling.md) · [ADR-009](decisions/ADR-009-inventory-reservation.md) |
 
 ## 1. Rules

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Phase | 2 — Consistency and failure analysis |
-| Status | Proposed, for architecture approval |
+| Status | Approved 2026-10-02 |
 | Related | [Architecture §15](architecture.md#15-failure-handling) · [Order lifecycle](order-lifecycle.md) · [Consistency model](consistency-model.md) · [Event model](event-model.md) |
 
 Scenarios S1–S12 are the brief's §10. S13–S20 are the ones the gateway and scheduler contracts, and the flash sale, add. Phase 11 automates every scenario, or documents why it stays manual.

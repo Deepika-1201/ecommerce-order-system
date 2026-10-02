@@ -1,6 +1,6 @@
 # ADR-012: No cache tier in V1
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [Consistency model §4](../consistency-model.md#4-caching), [ADR-009](ADR-009-inventory-reservation.md), [architecture §16](../architecture.md#16-scalability)
 

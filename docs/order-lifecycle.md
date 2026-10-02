@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Phase | 2 — Domain modeling |
-| Status | Proposed, for architecture approval |
+| Status | Approved 2026-10-02 |
 | Related | [Domain model](domain-model.md) · [Architecture §13 (saga)](architecture.md#13-saga-architecture) · [ADR-007](decisions/ADR-007-saga-orchestration.md) · [Failure handling](failure-handling.md) |
 
 ## 1. Lifecycle at a glance

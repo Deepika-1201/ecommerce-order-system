@@ -1,6 +1,6 @@
 # ADR-014: Deployment on AWS with EKS and Terraform
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [Architecture §19](../architecture.md#19-deployment), [ADR-001](ADR-001-ecosystem-boundaries.md), [ADR-006](ADR-006-kafka.md)
 

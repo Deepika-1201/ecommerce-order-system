@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Phase | 2 — Domain modeling |
-| Status | Proposed, for architecture approval |
+| Status | Approved 2026-10-02 |
 | Related | [Requirements](requirements.md) · [Order lifecycle](order-lifecycle.md) · [Architecture](architecture.md) · [Event model](event-model.md) |
 
 ## 1. Bounded contexts

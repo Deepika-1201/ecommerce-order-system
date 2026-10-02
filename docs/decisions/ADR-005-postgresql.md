@@ -1,6 +1,6 @@
 # ADR-005: PostgreSQL, a schema per module, Spring Data JDBC
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [ADR-004](ADR-004-modular-monolith.md), [ADR-009](ADR-009-inventory-reservation.md), [consistency model](../consistency-model.md)
 

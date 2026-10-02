@@ -1,6 +1,6 @@
 # ADR-004: Modular monolith first, with api and worker roles
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [Architecture §9](../architecture.md#9-high-level-architecture), [domain model](../domain-model.md), [ADR-007](ADR-007-saga-orchestration.md), [ADR-008](ADR-008-transactional-outbox.md)
 

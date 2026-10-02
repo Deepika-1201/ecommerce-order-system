@@ -1,6 +1,6 @@
 # ADR-010: Layered idempotency
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [ADR-002](ADR-002-payment-gateway-integration.md), [ADR-003](ADR-003-job-scheduler-integration.md), [ADR-008](ADR-008-transactional-outbox.md), [failure handling](../failure-handling.md)
 

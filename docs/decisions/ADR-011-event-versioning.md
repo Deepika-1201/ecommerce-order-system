@@ -1,6 +1,6 @@
 # ADR-011: Event contracts and versioning
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [Event model](../event-model.md), [ADR-006](ADR-006-kafka.md)
 

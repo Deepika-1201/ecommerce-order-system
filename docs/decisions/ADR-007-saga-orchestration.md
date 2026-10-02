@@ -1,6 +1,6 @@
 # ADR-007: Orchestrated saga for the order lifecycle
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [Order lifecycle](../order-lifecycle.md), [architecture §13](../architecture.md#13-saga-architecture), [ADR-002](ADR-002-payment-gateway-integration.md), [ADR-008](ADR-008-transactional-outbox.md), [ADR-009](ADR-009-inventory-reservation.md)
 

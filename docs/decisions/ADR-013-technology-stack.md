@@ -1,6 +1,6 @@
 # ADR-013: Technology stack
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [ADR-005](ADR-005-postgresql.md), [ADR-006](ADR-006-kafka.md), [ADR-014](ADR-014-deployment.md)
 

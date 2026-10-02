@@ -1,6 +1,6 @@
 # ADR-008: Transactional outbox with a polling relay
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [ADR-004](ADR-004-modular-monolith.md), [ADR-006](ADR-006-kafka.md), [ADR-007](ADR-007-saga-orchestration.md), [event model](../event-model.md)
 

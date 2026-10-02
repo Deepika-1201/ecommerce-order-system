@@ -1,6 +1,6 @@
 # ADR-009: Inventory reservation with conditional updates and holds
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [Domain model §2](../domain-model.md#2-aggregates-and-invariants), [architecture §11.3 and §16](../architecture.md#16-scalability), [ADR-002](ADR-002-payment-gateway-integration.md), [ADR-007](ADR-007-saga-orchestration.md)
 
