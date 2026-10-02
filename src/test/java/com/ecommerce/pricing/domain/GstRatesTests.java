@@ -3,6 +3,7 @@ package com.ecommerce.pricing.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecommerce.catalog.GstCategory;
+import com.ecommerce.pricing.TaxRegime;
 import org.junit.jupiter.api.Test;
 
 class GstRatesTests {

@@ -1,5 +1,6 @@
 package com.ecommerce.pricing.domain;
 
+import com.ecommerce.pricing.TaxRegime;
 import java.util.List;
 
 /** The arithmetic of a quote, in paise; every total is the sum of its parts (ADR-019). */

@@ -40,6 +40,7 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 | `invalid_request` | 400 | Another client error, such as a missing parameter |
 | `invalid_cursor` | 400 | The pagination cursor was not issued by this API |
 | `invalid_options`, `invalid_option_values` | 400 | A product's options, or a variant's option values, break the option rules |
+| `invalid_coupon_rule` | 400 | A coupon's fields do not match its kind, or its window ends before it starts |
 | `idempotency_key_required`, `invalid_idempotency_key` | 400 | `Idempotency-Key` is missing, or not 1–255 printable characters |
 | `unauthorized` | 401 | No token, or the token is invalid or expired |
 | `forbidden` | 403 | The token lacks the role |

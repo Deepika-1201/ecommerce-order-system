@@ -267,6 +267,85 @@
           }
         }
       },
+      "CouponList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/CouponResponse"
+            },
+            "type" : "array"
+          },
+          "next_cursor" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CouponResponse" : {
+        "properties" : {
+          "active" : {
+            "type" : "boolean"
+          },
+          "amount_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "code" : {
+            "type" : "string"
+          },
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "kind" : {
+            "enum" : [ "PERCENT", "FLAT" ],
+            "type" : "string"
+          },
+          "max_discount_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "min_order_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "per_customer_limit" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "percent_bps" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "redeemed" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "reserved" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "total_limit" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "updated_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "valid_from" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "valid_until" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        }
+      },
       "CreateCategory" : {
         "properties" : {
           "name" : {
@@ -286,6 +365,64 @@
           }
         },
         "required" : [ "name", "slug" ]
+      },
+      "CreateCoupon" : {
+        "properties" : {
+          "active" : {
+            "type" : "boolean"
+          },
+          "amount_paise" : {
+            "format" : "int64",
+            "maximum" : 1000000000,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "code" : {
+            "pattern" : "[A-Za-z0-9][A-Za-z0-9-]{3,19}",
+            "type" : "string"
+          },
+          "kind" : {
+            "enum" : [ "PERCENT", "FLAT" ],
+            "type" : "string"
+          },
+          "max_discount_paise" : {
+            "format" : "int64",
+            "maximum" : 1000000000,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "min_order_paise" : {
+            "format" : "int64",
+            "maximum" : 1000000000,
+            "minimum" : 0,
+            "type" : "integer"
+          },
+          "per_customer_limit" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "percent_bps" : {
+            "format" : "int32",
+            "maximum" : 10000,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "total_limit" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "valid_from" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "valid_until" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        },
+        "required" : [ "code", "kind" ]
       },
       "CreateProduct" : {
         "properties" : {
@@ -567,6 +704,22 @@
             "maxLength" : 60,
             "minLength" : 0,
             "pattern" : "[a-z0-9]+(-[a-z0-9]+)*",
+            "type" : "string"
+          }
+        }
+      },
+      "UpdateCoupon" : {
+        "properties" : {
+          "active" : {
+            "type" : "boolean"
+          },
+          "total_limit" : {
+            "format" : "int32",
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "valid_until" : {
+            "format" : "date-time",
             "type" : "string"
           }
         }
@@ -1203,6 +1356,147 @@
         "tags" : [ "Catalog administration" ]
       }
     },
+    "/v1/admin/pricing/coupons" : {
+      "get" : {
+        "operationId" : "listCoupons",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 20,
+            "format" : "int32",
+            "maximum" : 50,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CouponList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "List coupons, newest first",
+        "tags" : [ "Pricing administration" ]
+      },
+      "post" : {
+        "operationId" : "createCoupon",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateCoupon"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CouponResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Create a coupon; its rule never changes afterwards",
+        "tags" : [ "Pricing administration" ]
+      }
+    },
+    "/v1/admin/pricing/coupons/{id}" : {
+      "get" : {
+        "operationId" : "getCoupon",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CouponResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Read a coupon with its usage",
+        "tags" : [ "Pricing administration" ]
+      },
+      "patch" : {
+        "operationId" : "updateCoupon",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/UpdateCoupon"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CouponResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Switch a coupon on or off, move its end, or change its limit",
+        "tags" : [ "Pricing administration" ]
+      }
+    },
     "/v1/categories" : {
       "get" : {
         "operationId" : "categoryTree",
@@ -1558,6 +1852,9 @@
   "tags" : [ {
     "description" : "Role admin. Product responses carry the version as ETag.",
     "name" : "Catalog administration"
+  }, {
+    "description" : "Role admin. Coupons and their usage.",
+    "name" : "Pricing administration"
   }, {
     "description" : "No token needed. Cacheable for 30 s, with ETags.",
     "name" : "Catalog"

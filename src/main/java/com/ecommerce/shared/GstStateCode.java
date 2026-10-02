@@ -1,6 +1,5 @@
-package com.ecommerce.customer.web;
+package com.ecommerce.shared;
 
-import com.ecommerce.shared.IndianState;
 import jakarta.validation.Constraint;
 import jakarta.validation.ConstraintValidator;
 import jakarta.validation.ConstraintValidatorContext;

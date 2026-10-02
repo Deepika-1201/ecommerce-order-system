@@ -3,6 +3,7 @@ package com.ecommerce.pricing.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecommerce.catalog.GstCategory;
+import com.ecommerce.pricing.TaxRegime;
 import com.ecommerce.pricing.domain.PricingInput.Line;
 import com.ecommerce.pricing.domain.PricingInput.ShippingRule;
 import com.ecommerce.shared.IndianState;

@@ -318,7 +318,7 @@ class ProductRepository {
     }
 
     /** jsonb does not keep key order; the product's dimension order is the one shown. */
-    private static Map<String, String> inDimensionOrder(List<ProductOption> options, Map<String, String> values) {
+    static Map<String, String> inDimensionOrder(List<ProductOption> options, Map<String, String> values) {
         Map<String, String> ordered = new LinkedHashMap<>();
         options.forEach(option -> {
             if (values.containsKey(option.name())) {

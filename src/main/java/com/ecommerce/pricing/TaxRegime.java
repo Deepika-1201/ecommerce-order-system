@@ -1,4 +1,4 @@
-package com.ecommerce.pricing.domain;
+package com.ecommerce.pricing;
 
 import com.ecommerce.shared.IndianState;
 
@@ -7,7 +7,7 @@ public enum TaxRegime {
     INTRA_STATE,
     INTER_STATE;
 
-    static TaxRegime of(IndianState supplyState, IndianState deliveryState) {
+    public static TaxRegime of(IndianState supplyState, IndianState deliveryState) {
         return supplyState == deliveryState ? INTRA_STATE : INTER_STATE;
     }
 }

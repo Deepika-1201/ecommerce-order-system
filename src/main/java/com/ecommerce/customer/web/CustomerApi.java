@@ -3,6 +3,7 @@ package com.ecommerce.customer.web;
 import com.ecommerce.customer.domain.Address;
 import com.ecommerce.customer.domain.AddressDetails;
 import com.ecommerce.customer.domain.Customer;
+import com.ecommerce.shared.GstStateCode;
 import com.ecommerce.shared.IndianState;
 import com.ecommerce.shared.MobileNumbers;
 import jakarta.validation.constraints.NotBlank;

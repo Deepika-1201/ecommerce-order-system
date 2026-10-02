@@ -956,7 +956,7 @@ Property tests use jqwik 1.10, which runs on JUnit 6. A spike on 2026-10-02 show
 | `QuoteTests` | Quotes from carts: unavailable items, coupon errors, price changes, validity, owner-scoped reads |
 | `CrossOwnerCartTests` | Customer B, another guest's token, and a guest token used on `/v1/me` never reach customer A's cart or quotes |
 | `CouponAdminTests` | Validation, unique codes, the mutable fields, `limit_below_usage`, admin only, audit |
-| `CouponRedemptionTests` | 20 concurrent reservations of the last use give exactly one `HELD`; the per-customer limit holds under concurrency; reserve, commit and release are idempotent; the counters equal the redemptions |
+| `CouponRedemptionTests` | Eight reservations of the last use, queued on the coupon's row lock and released together, give exactly one `HELD`; the per-customer limit holds the same way; reserve, commit and release are idempotent; after every step of a random sequence, the counters equal the redemptions |
 | `CartExpiryTests` | Expired carts and old quotes are deleted by their tasks, and nothing else |
 
 ### 4.16 Exit criteria

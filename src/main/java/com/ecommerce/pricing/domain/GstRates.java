@@ -1,6 +1,7 @@
 package com.ecommerce.pricing.domain;
 
 import com.ecommerce.catalog.GstCategory;
+import com.ecommerce.pricing.TaxRegime;
 import java.time.LocalDate;
 
 /**

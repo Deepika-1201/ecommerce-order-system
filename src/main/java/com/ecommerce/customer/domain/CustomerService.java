@@ -1,5 +1,6 @@
 package com.ecommerce.customer.domain;
 
+import com.ecommerce.customer.Customers;
 import com.ecommerce.platform.ApiException;
 import com.ecommerce.platform.Caller;
 import com.ecommerce.shared.Ids;
@@ -15,7 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
  * call; every address change locks the customer row, which serializes the limit and default rules.
  */
 @Service
-public class CustomerService {
+public class CustomerService implements Customers {
 
     static final int MAX_ADDRESSES = 10;
 
@@ -23,6 +24,12 @@ public class CustomerService {
 
     CustomerService(CustomerRepository customers) {
         this.customers = customers;
+    }
+
+    @Override
+    @Transactional
+    public UUID idOf(Caller caller) {
+        return resolve(caller, false).id();
     }
 
     @Transactional
