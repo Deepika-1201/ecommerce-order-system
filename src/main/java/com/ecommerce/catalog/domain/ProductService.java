@@ -1,5 +1,6 @@
 package com.ecommerce.catalog.domain;
 
+import com.ecommerce.catalog.GstCategory;
 import com.ecommerce.catalog.domain.ProductCommands.NewProduct;
 import com.ecommerce.catalog.domain.ProductCommands.NewVariant;
 import com.ecommerce.catalog.domain.ProductCommands.ProductChanges;

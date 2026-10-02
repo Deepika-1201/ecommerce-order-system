@@ -1,5 +1,6 @@
 package com.ecommerce.catalog.domain;
 
+import com.ecommerce.catalog.GstCategory;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;

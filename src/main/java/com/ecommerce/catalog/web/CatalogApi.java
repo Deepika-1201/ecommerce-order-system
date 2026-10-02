@@ -1,7 +1,7 @@
 package com.ecommerce.catalog.web;
 
+import com.ecommerce.catalog.GstCategory;
 import com.ecommerce.catalog.domain.Category;
-import com.ecommerce.catalog.domain.GstCategory;
 import com.ecommerce.catalog.domain.ImageStatus;
 import com.ecommerce.catalog.domain.Product;
 import com.ecommerce.catalog.domain.ProductImage;

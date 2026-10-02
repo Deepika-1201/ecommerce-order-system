@@ -1,5 +1,6 @@
 package com.ecommerce.catalog.domain;
 
+import com.ecommerce.catalog.GstCategory;
 import com.ecommerce.platform.ApiException;
 import java.sql.ResultSet;
 import java.sql.SQLException;
