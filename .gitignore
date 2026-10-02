@@ -1,1 +1,20 @@
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+.embedded-pg/
+
+### IDEs ###
+.idea/
+*.iml
+out/
+.vscode/
+.classpath
+.project
+.settings/
+bin/
+
+### Local secrets ###
+.env
+
+### OS ###
 .DS_Store

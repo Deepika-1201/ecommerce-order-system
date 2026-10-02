@@ -12,6 +12,18 @@ It is one of four independent systems that integrate only through published cont
 
 > **Status:** Phase 1, scaffolding. The design (requirements, HLD, saga, consistency and failure analysis, ADR-001 to ADR-014) was approved on 2026-10-02.
 
+## Quick start
+
+JDK 25 is required; Docker is optional.
+
+```bash
+./gradlew build          # compile (-Werror), module-boundary and architecture checks, all tests
+./gradlew bootTestRun    # run locally on embedded PostgreSQL: API on :8080, health and info on :8081
+docker compose up --build   # or: PostgreSQL 17 and the app in containers, with JSON logs
+```
+
+`ECOM_ROLES` selects what an instance runs: `api`, `worker`, or both (the default).
+
 ## Documentation
 
 | Doc | Contents |
@@ -24,4 +36,5 @@ It is one of four independent systems that integrate only through published cont
 | [docs/failure-handling.md](docs/failure-handling.md) | 20 failure scenarios: detection, recovery, compensation, duplicates, customer impact |
 | [docs/event-model.md](docs/event-model.md) | Commands, replies and events; envelope; topics; ordering; deduplication |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | Phases and exit criteria |
+| [docs/low-level-design.md](docs/low-level-design.md) | Low-level design, one section per phase, written before its code |
 | [docs/decisions/](docs/decisions/README.md) | Architecture decision records |

@@ -128,22 +128,24 @@ Two stages: JDK 25 to build, JRE 25 to run. The jar is extracted in layers (depe
 ### 1.11 Continuous integration (GitHub Actions)
 
 - **build:** Temurin JDK 25, Gradle, `./gradlew build`: compile with `-Werror`, then all tests. Test reports are uploaded on failure.
-- **container:** after build. Builds the image, starts `docker compose`, waits for readiness on port 8081, and checks the info endpoint's roles.
+- **container:** after build. Builds the image, starts `docker compose`, waits for readiness on port 8081, checks the roles reported by the info endpoint, and checks that an unknown route answers with a `not_found` problem.
 
 ### 1.12 Tests
 
 | Test | Proves |
 |---|---|
-| `ModularityTests` | Spring Modulith accepts the module structure and allowed dependencies |
-| `ModuleBoundaryEnforcementTests` | A fixture with a forbidden dependency is reported, so the check really can fail the build |
-| `ArchitectureTests` | Coding rules: no field injection, no standard streams, no `java.util.logging`, public controllers use `@ApiController`, `shared` and `platform` depend on no business module |
-| `ApplicationRolesTests` | The app starts on embedded PostgreSQL in the `api`, `worker` and combined roles. Info reports the roles; readiness is up; every module has its schema and history; the public API is served only in the `api` role |
-| `ProblemDetailsTests` | The error model for 400, 404, 405, 415 and 500, and request id propagation |
+| `ModularityTests` | Spring Modulith detects all eleven modules and accepts their allowed dependencies |
+| `ModuleBoundaryEnforcementTests` | A fixture (root marked `@Modulithic`) with a forbidden dependency is reported, so the check really can fail the build |
+| `ArchitectureTests` | Coding rules: no field injection, no standard streams, no `java.util.logging`, no generic exceptions, public controllers use `@ApiController`. Module layering is Spring Modulith's job |
+| `ApiRoleTests`, `WorkerRoleTests`, `BothRolesTests` | The app starts on embedded PostgreSQL in each role. Info reports the roles; liveness and readiness are up on both ports; the public API is served only in the `api` role |
+| `ModuleMigrationsTests` | Every module has its schema, its own history with V1 applied and its owner comment; every migration folder belongs to a registered module |
+| `RolePropertiesTests` | `ecom.roles` binds case-insensitively; an empty or unknown role fails startup |
+| `ProblemDetailsTests` | The error model for 400 (malformed and validation), 404, 405, 409 (module error), 415 and 500, and request id propagation |
 
 ### 1.13 Exit criteria
 
 | Criterion | Shown by |
 |---|---|
 | `./gradlew build` green in CI | The build job |
-| The app starts in both roles | `ApplicationRolesTests`; the compose smoke test in CI |
-| A forbidden module dependency fails the build | `ModuleBoundaryEnforcementTests` and `ModularityTests` |
+| The app starts in both roles | The role tests; the compose smoke test in CI |
+| A forbidden module dependency fails the build | `ModuleBoundaryEnforcementTests` and `ModularityTests`. Checked by hand once: a catalog class using an inventory-internal type failed the build with "Module 'catalog' depends on module 'inventory' … Allowed targets: platform, shared" |
