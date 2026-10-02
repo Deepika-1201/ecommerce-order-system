@@ -3,10 +3,10 @@
 | | |
 |---|---|
 | Phase | 1 — Requirements discovery |
-| Status | Draft. Scope confirmed 2026-10-02: this repository builds only the e-commerce system, one of four systems in the ecosystem (§2). The other answers are proposed defaults awaiting confirmation |
-| Next | Domain modeling → HLD alternatives → HLD → ADR review |
+| Status | Approved 2026-10-02: all Phase 1 defaults accepted. Scope: this repository builds only the e-commerce system, one of four systems in the ecosystem (§2) |
+| Next | [Domain model](domain-model.md) → [architecture](architecture.md) (HLD) → architecture approval → [implementation plan](implementation-plan.md) |
 
-Items marked **Assumed** are proposed defaults that have not been confirmed. Items marked **Ecosystem** follow from the four-system architecture in §2.
+Rows marked **Assumed** were accepted as defaults on 2026-10-02 without separate discussion; they stay open to challenge. Items marked **Ecosystem** follow from the four-system architecture in §2.
 
 ---
 
@@ -26,39 +26,23 @@ This system is one of four independent systems that share infrastructure and int
 
 ```mermaid
 flowchart TB
-    clients["Customers, guests, staff<br/>(riders and drivers later)"]
-    gw["Edge API gateway<br/>TLS, OIDC validation, rate limits, routing"]
-    clients --> gw
-
+    clients["Customers, guests, staff"] --> gw["Edge API gateway<br/>TLS, OIDC validation, rate limits, routing"]
     subgraph systems["Independent systems: own repository, own database"]
         ecom["E-commerce<br/>(this project)"]
         pay["Payment Gateway"]
         sched["Job Scheduler"]
-        ride["Ride-hailing<br/>(not started)"]
+        ride["Ride-hailing<br/>(design not started)"]
     end
-
     gw --> ecom
     gw -->|hosted checkout, PSP webhooks| pay
     gw -.-> ride
-
     ecom -->|merchant API, Idempotency-Key| pay
     pay -.->|signed webhooks| ecom
     ecom -->|job submissions via outbox| sched
     sched -.->|tasks via gRPC worker| ecom
-    ride -.->|later, second merchant| pay
-    ride -.->|later, second tenant| sched
-
-    broker[("Event broker<br/>facts, not tasks")]
-    ecom -->|events via outbox| broker
-    ride -.-> broker
-
-    subgraph platform["Shared infrastructure: shared servers, not shared data"]
-        pg[("PostgreSQL<br/>database per system")]
-        redis[("Redis<br/>ACL user per system")]
-        s3[("Object storage<br/>bucket per system")]
-        obs["Observability<br/>OTel, Prometheus, Grafana, Tempo, Loki"]
-        idp["Identity provider (OIDC)"]
-    end
+    ecom -->|events via outbox| broker[("Event broker<br/>facts, not tasks")]
+    infra["Shared infrastructure: shared servers, not shared data<br/>PostgreSQL, a database per system · Redis, an ACL user per system<br/>Object storage, a bucket per system · Observability · Identity provider"]
+    broker ~~~ infra
 ```
 
 | System | Teaches | Status | What this system uses from it |
@@ -95,8 +79,9 @@ Ecosystem rules this system follows:
 | Q11 | Scale | NFR-1 and NFR-2 | Assumed |
 | Q12 | Reliability | NFR-4 to NFR-8 | Assumed |
 | Q13 | Security | No card data ever (the gateway's hosted checkout); §7 | Assumed |
-| Q14 | Deployment | AWS Mumbai (ap-south-1), alongside the gateway; container runtime decided at Technology Selection; environments created on demand and destroyed | Assumed |
+| Q14 | Deployment | AWS Mumbai (ap-south-1), alongside the gateway; container runtime decided at Technology Selection; environments created on demand and destroyed. Terraform is tested without an AWS account; applying it to a real account is a separate step with a cost estimate ([ADR-014](decisions/ADR-014-deployment.md)) | Assumed |
 | Q15 | Extensibility | The V1 model must not preclude returns with partial refunds, multiple warehouses with split shipments, or marketplace sellers | Assumed |
+| Q16 | Surfaces | REST API with OpenAPI, plus demo scripts. Customers pay on the gateway's hosted checkout. No storefront UI | Assumed |
 
 **Delivery progression, adjusted for the ecosystem.** The broker, gateway and scheduler exist from day one, so V1 already has real cross-system boundaries:
 
@@ -231,9 +216,9 @@ Marketplace sellers, multiple warehouses, cash on delivery, returns and exchange
 
 ## 9. Open items
 
-### 9.1 Assumptions awaiting confirmation
+### 9.1 Assumptions
 
-Every row marked Assumed in §3, and NFR-1, NFR-3, NFR-4 and NFR-5.
+None open. The defaults (rows marked Assumed in §3, and NFR-1, NFR-3, NFR-4 and NFR-5) were accepted on 2026-10-02.
 
 ### 9.2 Sibling projects (nothing blocking)
 

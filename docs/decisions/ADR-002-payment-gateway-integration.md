@@ -1,6 +1,6 @@
 # ADR-002: Payments through the ecosystem's Payment Gateway, as a merchant
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [ADR-001](ADR-001-ecosystem-boundaries.md), [ADR-003](ADR-003-job-scheduler-integration.md), [requirements §5.7](../requirements.md#57-payments-through-the-payment-gateway)
 

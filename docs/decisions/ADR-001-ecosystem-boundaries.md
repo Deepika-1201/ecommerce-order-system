@@ -1,6 +1,6 @@
 # ADR-001: Four independent systems on shared infrastructure
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02)
 - **Date:** 2026-10-02
 - **Related:** [requirements §2](../requirements.md#2-ecosystem-context), [ADR-002](ADR-002-payment-gateway-integration.md), [ADR-003](ADR-003-job-scheduler-integration.md)
 

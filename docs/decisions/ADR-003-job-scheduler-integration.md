@@ -1,6 +1,6 @@
 # ADR-003: Background tasks on the ecosystem's Job Scheduler
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-02), amended the same day by the HLD (see the end)
 - **Date:** 2026-10-02
 - **Related:** [ADR-001](ADR-001-ecosystem-boundaries.md), [ADR-002](ADR-002-payment-gateway-integration.md), [requirements §5.10](../requirements.md#510-events-and-background-work)
 
@@ -39,7 +39,7 @@ How does this system schedule and run background work on the scheduler, without 
 
 **Option B** (proposed). It needs no change to the scheduler, so all the work stays in this repository. Option C remains the better long-term path if the scheduler ships HTTP executors; it would replace the worker behind the same port.
 
-- **Submission through the outbox.** A task is written to this system's outbox in the same transaction as the state change that needs it. The relay submits it with `Idempotency-Key` = the outbox record id and `dedupe_key` = a business key such as `order:{id}:payment-deadline`. Relay retries cannot create duplicates, and a scheduler outage only delays submission.
+- **Submission through the outbox.** A task is written to this system's outbox in the same transaction as the state change that needs it. The relay submits it with `Idempotency-Key` = the outbox record id and `dedupe_key` = a business key such as `shipment:{id}:booking`. Relay retries cannot create duplicates, and a scheduler outage only delays submission.
 - **Worker.** A worker inside this system implements the scheduler's gRPC protocol (`proto/jobscheduler/worker/v1/worker.proto` in its repository). It registers in this system's pool with the job types it handles, long-polls for assignments, heartbeats at the interval returned at registration (5 s by default), and reports each outcome with the attempt number as fencing token. If it cannot renew its session within the lease, it fences itself: it stops its handlers, discards their results and registers again.
 - **Handlers** run in-process, are idempotent on the job id, and re-read current state: a deadline task for an order that is already paid does nothing. Tasks are not cancelled on the happy path; cancelling needs the job id and is only an optimization.
 - **Correctness does not depend on punctuality.** Reservations carry `expires_at`, and reserving treats expired reservations as released. Payment expiry is decided by the gateway (ADR-002). A late or missing task delays cleanup and notifications, never an invariant.
@@ -60,3 +60,7 @@ How does this system schedule and run background work on the scheduler, without 
 - No change to the scheduler is needed. If it adds HTTP executors, option C can replace the worker behind the `TaskScheduler` port.
 - Local runs use the in-process adapter, or the real scheduler through the optional compose profile.
 - Integration tests for the worker need the scheduler's container image, built from its repository.
+
+## Amendment (2026-10-02, from the HLD)
+
+Deadlines and cleanup run as **recurring sweeps**, not as one delayed job per order. At NFR-1's peak of 200 orders/s, a deadline job per order would add about 200 submissions/s against the scheduler's default tenant limit of 500/s, for timers that are only backstops: the gateway's webhooks drive the normal path. A sweep every minute finds overdue orders through an index on `deadline_at`, so a backstop fires at most a minute late, which does not matter for deadlines measured in tens of minutes. One job per item is kept where per-item retries and dead-lettering matter: shipment bookings ([architecture §16](../architecture.md#16-scalability)).
