@@ -90,6 +90,12 @@ class TokenValidationTests extends IntegrationTest {
         assertInvalidToken(TestIdentityProvider.token(null).roles("customer").sign());
     }
 
+    /** Spring Security rejects a missing claim by itself; a blank one only our validator catches. */
+    @Test
+    void aTokenWithABlankSubjectIsUnauthorized() {
+        assertInvalidToken(TestIdentityProvider.token("  ").roles("customer").sign());
+    }
+
     @Test
     void somethingThatIsNotATokenIsUnauthorized() {
         assertInvalidToken("not-a-token");

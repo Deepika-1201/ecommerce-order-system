@@ -10,7 +10,7 @@ It is one of four independent systems that integrate only through published cont
 | [distributed-job-scheduler](https://github.com/Deepika-1201/distributed-job-scheduler) | Runs this system's deadlines, retried calls and recurring jobs |
 | [ride-hailing-platform](https://github.com/Deepika-1201/ride-hailing-platform) | Separate system in the same ecosystem; no direct integration |
 
-> **Status:** Phases 1 (scaffolding) and 2 (platform: transactional outbox, dispatcher, Kafka relay, task scheduler, idempotency keys, audit log) are done. Phase 3 (catalog and customers) is next. The design (requirements, HLD, saga, consistency and failure analysis, ADR-001 to ADR-014) was approved on 2026-10-02.
+> **Status:** Phases 1 (scaffolding), 2 (platform: transactional outbox, dispatcher, Kafka relay, task scheduler, idempotency keys, audit log) and 3 (catalog and customers: OIDC resource server, catalog with search and pre-signed image uploads, customer profiles and addresses, OpenAPI document) are done. Phase 4 (cart and pricing) is next. The design (requirements, HLD, saga, consistency and failure analysis, ADR-001 to ADR-014) was approved on 2026-10-02.
 
 ## Quick start
 
