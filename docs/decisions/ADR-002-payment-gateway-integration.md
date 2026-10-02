@@ -57,5 +57,5 @@ How does this system request payments and learn their outcomes reliably, given t
 ## Consequences
 
 - Contract tests run against the gateway's OpenAPI document. A breaking change to the gateway's merchant API needs a new API version there.
-- Local runs use either the fake or the real gateway from the platform repository's compose file.
+- Local runs use either the fake or the real gateway, started by this repository's optional compose profile.
 - Ride-hailing can integrate the same way, which gives the gateway a second real merchant.

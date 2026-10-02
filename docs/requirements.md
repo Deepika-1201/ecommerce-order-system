@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Phase | 1 — Requirements discovery |
-| Status | Draft. The four-system ecosystem direction (2026-10-02) is applied; the other answers are proposed defaults awaiting confirmation |
+| Status | Draft. Scope confirmed 2026-10-02: this repository builds only the e-commerce system, one of four systems in the ecosystem (§2). The other answers are proposed defaults awaiting confirmation |
 | Next | Domain modeling → HLD alternatives → HLD → ADR review |
 
 Items marked **Assumed** are proposed defaults that have not been confirmed. Items marked **Ecosystem** follow from the four-system architecture in §2.
@@ -20,7 +20,9 @@ V1 is a reference implementation on simulated carriers and the gateway's mock PS
 
 ## 2. Ecosystem context
 
-This system is one of four independent systems that share a platform and integrate through published contracts ([ADR-001](decisions/ADR-001-ecosystem-boundaries.md)). It is the first of the four to integrate with two of the others.
+This system is one of four independent systems that share infrastructure and integrate through published contracts ([ADR-001](decisions/ADR-001-ecosystem-boundaries.md)). It is the first of the four to integrate with two of the others.
+
+**Scope of this repository:** the e-commerce system only. The Payment Gateway and Job Scheduler are used unchanged, through their existing contracts. Ride-hailing is a separate project.
 
 ```mermaid
 flowchart TB
@@ -42,7 +44,7 @@ flowchart TB
     ecom -->|merchant API, Idempotency-Key| pay
     pay -.->|signed webhooks| ecom
     ecom -->|job submissions via outbox| sched
-    sched -.->|tasks via HTTP executor| ecom
+    sched -.->|tasks via gRPC worker| ecom
     ride -.->|later, second merchant| pay
     ride -.->|later, second tenant| sched
 
@@ -50,7 +52,7 @@ flowchart TB
     ecom -->|events via outbox| broker
     ride -.-> broker
 
-    subgraph platform["Shared platform: shared servers, not shared data"]
+    subgraph platform["Shared infrastructure: shared servers, not shared data"]
         pg[("PostgreSQL<br/>database per system")]
         redis[("Redis<br/>ACL user per system")]
         s3[("Object storage<br/>bucket per system")]
@@ -74,7 +76,7 @@ Ecosystem rules this system follows:
 - **E4** The broker carries facts (events); the scheduler carries tasks (do X at time T, with retries). *(Proposed)*
 - **E5** One edge API gateway for external traffic. It authenticates end users and applies coarse rate limits; each system still authorizes every request. Calls between systems stay on the internal network, with each system's own credentials. *(Proposed)*
 - **E6** One observability stack. An order is traceable across e-commerce, gateway and scheduler by trace context and business ids (the gateway's `merchant_order_id` is the order id). *(Ecosystem)*
-- **E7** Ecosystem-wide assets (edge configuration, identity-provider realm, broker topics and ACLs, observability stack, a compose file for all systems, cross-system tests) live in a separate platform repository. *(Proposed)*
+- **E7** No change to a sibling project is required. A shared platform repository (edge configuration, identity-provider realm, broker ACLs, one observability stack, a compose file for all systems) is deferred until a second system needs it. Until then, this repository's compose file runs what this system needs, and an optional profile runs the real gateway and scheduler. *(Proposed)*
 
 ## 3. Scope decisions (from Phase 1)
 
@@ -93,7 +95,7 @@ Ecosystem rules this system follows:
 | Q11 | Scale | NFR-1 and NFR-2 | Assumed |
 | Q12 | Reliability | NFR-4 to NFR-8 | Assumed |
 | Q13 | Security | No card data ever (the gateway's hosted checkout); §7 | Assumed |
-| Q14 | Deployment | AWS Mumbai (ap-south-1), alongside the gateway, on the shared platform; container runtime decided with the platform repository; environments created on demand and destroyed | Assumed |
+| Q14 | Deployment | AWS Mumbai (ap-south-1), alongside the gateway; container runtime decided at Technology Selection; environments created on demand and destroyed | Assumed |
 | Q15 | Extensibility | The V1 model must not preclude returns with partial refunds, multiple warehouses with split shipments, or marketplace sellers | Assumed |
 
 **Delivery progression, adjusted for the ecosystem.** The broker, gateway and scheduler exist from day one, so V1 already has real cross-system boundaries:
@@ -103,7 +105,7 @@ Ecosystem rules this system follows:
 3. **V3:** extract services where a driver exists, starting with Inventory (it scales differently in a flash sale).
 4. **V4:** the saga runs across the extracted services over the broker.
 5. **V5:** horizontal scaling, failure injection and flash-sale load tests.
-6. **V6:** production deployment on the shared platform.
+6. **V6:** production deployment on AWS.
 
 ## 4. Actors
 
@@ -209,7 +211,7 @@ Ecosystem rules this system follows:
 | NFR-7 | Recovery | No order stays non-terminal past its deadline without an alert. Every asynchronous step has a timeout and an owner |
 | NFR-8 | Dependency failure | A broker outage never blocks order placement (the outbox buffers). A scheduler outage delays cleanup and notifications, never an invariant. A gateway outage stops new prepaid orders with a clear error |
 | NFR-9 | Observability | An order is traceable end to end across all three systems. Metrics from brief §38. No personal or payment data in logs |
-| NFR-10 | Local development | `docker compose up` runs this system alone, with fakes for the gateway and scheduler. The platform repository runs all systems together |
+| NFR-10 | Local development | `docker compose up` runs this system alone, with fakes for the gateway and scheduler. An optional profile runs the real gateway and scheduler alongside it |
 | NFR-11 | Cost | Cloud environments are created on demand and destroyed. An always-on managed service needs an ADR that justifies its cost |
 
 ## 7. Security and compliance constraints
@@ -233,15 +235,15 @@ Marketplace sellers, multiple warehouses, cash on delivery, returns and exchange
 
 Every row marked Assumed in §3, and NFR-1, NFR-3, NFR-4 and NFR-5.
 
-### 9.2 Cross-project items
+### 9.2 Sibling projects (nothing blocking)
 
-| # | Item | Owner |
+| # | Item | Effect on this project |
 |---|---|---|
-| X1 | How scheduler tasks reach this system: an HTTP executor in the scheduler (on its roadmap) or a Java worker here ([ADR-003](decisions/ADR-003-job-scheduler-integration.md)) | Scheduler, this project |
-| X2 | Per-pool worker credentials, so that one system's workers cannot take another system's jobs (scheduler phase 12) | Scheduler |
-| X3 | The gateway has no merchant API that lists payments by time window. This system reconciles by the payment ids it stores, which is enough because payment creation is idempotent and retried until it succeeds | Gateway (optional) |
-| X4 | Both sibling `docker compose` files bind host ports 5432 and 8080, and their observability stacks both use 3000 and 9090, so they cannot run side by side. The platform repository needs a port plan and one shared observability stack | Platform |
-| X5 | Broker product (Kafka or RabbitMQ), edge gateway product and container runtime: chosen once for the platform at Technology Selection | Platform |
+| X1 | The scheduler runs jobs only on gRPC workers, with a Go SDK only | This system implements the worker protocol in Java ([ADR-003](decisions/ADR-003-job-scheduler-integration.md)). An HTTP executor, on the scheduler's roadmap, would make that worker unnecessary |
+| X2 | Scheduler workers share one token until its phase 12 adds per-pool credentials | This system runs in its own pool; isolation rests on configuration until then |
+| X3 | The gateway has no merchant API that lists payments by time window | Reconciliation checks the payment ids this system stores. That is enough because payment creation is idempotent and retried until it succeeds |
+| X4 | Both sibling `docker compose` files bind host ports 5432 and 8080, and their observability stacks both use 3000 and 9090 | The optional compose profile gives the gateway and scheduler their own host ports; their repositories stay unchanged |
+| X5 | Broker product (Kafka or RabbitMQ), edge gateway product and container runtime | Chosen at this project's Technology Selection, and reused if a platform repository is created |
 
 ## 10. Glossary
 

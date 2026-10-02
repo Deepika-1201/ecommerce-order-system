@@ -31,32 +31,32 @@ How does this system schedule and run background work on the scheduler, without 
 | Option | Pros | Cons |
 |---|---|---|
 | A. Timers in this system's database (`FOR UPDATE SKIP LOCKED` pollers) | Simplest; transactional with state changes | Ignores the ecosystem; re-implements retries, dead-lettering and cron |
-| B. Scheduler REST API, plus a Java gRPC worker in this system | Works with the scheduler as it is | Re-implements the worker protocol (sessions, heartbeats, self-fencing) in Java, for one system |
-| **C. Scheduler REST API, plus an HTTP executor in the scheduler** | One executor serves every system in any language; already on the scheduler's roadmap; handlers here are plain idempotent HTTP endpoints | Work in the scheduler repository; one more network hop; the executor needs request signing and an SSRF guard |
+| **B. Scheduler REST API, plus a Java gRPC worker in this system** | Works with the scheduler as it is; all work stays in this repository | Re-implements the worker protocol (sessions, heartbeats, self-fencing) in Java, for one system |
+| C. Scheduler REST API, plus an HTTP executor in the scheduler | One executor serves every system in any language; already on the scheduler's roadmap; handlers here are plain idempotent HTTP endpoints | Needs work in the scheduler repository, outside this project's scope; one more network hop; the executor needs request signing and an SSRF guard |
 | D. Scheduler reads job requests from the broker | Matches the diagram's arrow | Changes the scheduler's intake; submission errors become asynchronous; no advantage over C until several systems need it |
 
 ## Decision
 
-**Option C** (proposed), with B as the fallback if the scheduler work is deferred.
+**Option B** (proposed). It needs no change to the scheduler, so all the work stays in this repository. Option C remains the better long-term path if the scheduler ships HTTP executors; it would replace the worker behind the same port.
 
 - **Submission through the outbox.** A task is written to this system's outbox in the same transaction as the state change that needs it. The relay submits it with `Idempotency-Key` = the outbox record id and `dedupe_key` = a business key such as `order:{id}:payment-deadline`. Relay retries cannot create duplicates, and a scheduler outage only delays submission.
-- **Handlers** are idempotent on the job id and re-read current state: a deadline task for an order that is already paid does nothing. Tasks are not cancelled on the happy path; cancelling needs the job id and is only an optimization.
+- **Worker.** A worker inside this system implements the scheduler's gRPC protocol (`proto/jobscheduler/worker/v1/worker.proto` in its repository). It registers in this system's pool with the job types it handles, long-polls for assignments, heartbeats at the interval returned at registration (5 s by default), and reports each outcome with the attempt number as fencing token. If it cannot renew its session within the lease, it fences itself: it stops its handlers, discards their results and registers again.
+- **Handlers** run in-process, are idempotent on the job id, and re-read current state: a deadline task for an order that is already paid does nothing. Tasks are not cancelled on the happy path; cancelling needs the job id and is only an optimization.
 - **Correctness does not depend on punctuality.** Reservations carry `expires_at`, and reserving treats expired reservations as released. Payment expiry is decided by the gateway (ADR-002). A late or missing task delays cleanup and notifications, never an invariant.
 - **Priorities:** deadlines `HIGH` (never shed), retried external calls and notifications `NORMAL`, cleanup `LOW`. The relay retries `429` and `503` answers.
-- **Isolation.** This system gets its own pool. A shared deployment needs per-pool worker credentials (scheduler phase 12), so that no system's executor runs another system's jobs.
+- **Isolation.** This system gets its own pool. Scheduler workers share one token until its phase 12 adds per-pool credentials, so until then isolation rests on pool configuration.
 - **Recurring jobs** are scheduler schedules in the `Asia/Kolkata` time zone.
 - **Port and adapters.** A `TaskScheduler` port, with an adapter for the scheduler and an in-process implementation for standalone runs and tests.
-- **Tracing.** The scheduler stores the submitter's `traceparent` and links the execution span to it.
+- **Tracing.** The scheduler stores the submitter's `traceparent` and passes it in each assignment; the worker links its execution span to it.
 
 ## Trade-offs
 
 - Background work depends on another system. Mitigated: invariants don't depend on it, and the outbox buffers submissions.
-- The extra hop (scheduler → HTTP executor → this system) adds latency. That is irrelevant for deadlines measured in minutes, and acceptable for retries.
-- The HTTP executor must sign its requests so that targets can authenticate the scheduler, refuse targets outside an allowlist (SSRF), and map responses onto the retry policy: `2xx` succeeds, `4xx` fails permanently, `5xx` and timeouts retry.
-- Option C needs work in the scheduler repository first. Until then, this system runs on the in-process adapter.
+- The worker protocol (sessions, long polls, heartbeats, self-fencing) is re-implemented in Java. It is tested against the real scheduler, because a fake would only confirm this project's own reading of the protocol.
+- Until per-pool credentials exist, a misconfigured worker from another system could take this system's jobs. Acceptable for a reference implementation, and documented as a known limitation.
 
 ## Consequences
 
-- The scheduler gets an ADR for the HTTP executor in its own repository; ride-hailing can use the executor too.
-- This system exposes internal task endpoints that are not routed through the public edge and are authenticated by the executor's signature.
-- If option C slips, option B (a Java worker) replaces it behind the same `TaskScheduler` port.
+- No change to the scheduler is needed. If it adds HTTP executors, option C can replace the worker behind the `TaskScheduler` port.
+- Local runs use the in-process adapter, or the real scheduler through the optional compose profile.
+- Integration tests for the worker need the scheduler's container image, built from its repository.

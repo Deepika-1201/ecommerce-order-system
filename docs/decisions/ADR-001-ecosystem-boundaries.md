@@ -1,4 +1,4 @@
-# ADR-001: Four independent systems on a shared platform
+# ADR-001: Four independent systems on shared infrastructure
 
 - **Status:** Proposed
 - **Date:** 2026-10-02
@@ -28,7 +28,7 @@ At runtime, are the four one system or four? What may they share, how do they in
 | Option | Coupling | Failure isolation | Learning value | Effort |
 |---|---|---|---|---|
 | A. One integrated system: shared database or shared code | High: schema changes ripple across systems | None: one bad query or deploy affects all four | Low: hides the integration problems the projects exist to show | Low at first, high later |
-| **B. Independent systems that integrate through published contracts, on a shared platform owned by a platform repository** | Contracts only | Per system; shared servers are the remaining risk, mitigated by rule 3 | High: real cross-system failures (timeouts, unknown outcomes, duplicate webhooks, contract versioning) | Medium: contracts, contract tests, a fifth repository |
+| **B. Independent systems that integrate through published contracts, on shared infrastructure** | Contracts only | Per system; shared servers are the remaining risk, mitigated by rule 3 | High: real cross-system failures (timeouts, unknown outcomes, duplicate webhooks, contract versioning) | Medium: contracts and contract tests |
 | C. Fully isolated systems with no integration | None | Total | Medium: each system alone, no cross-system story | Low |
 
 ## Decision
@@ -49,17 +49,17 @@ At runtime, are the four one system or four? What may they share, how do they in
 4. **Events and tasks.** The broker carries facts ("an order was placed"), fanned out and replayable. The scheduler carries tasks ("do this at time T, retry with backoff, dead-letter for re-drive"). Since the scheduler already covers task queues, the broker's role is an event log, which leans toward Kafka over RabbitMQ. The product is chosen in its own ADR at Technology Selection.
 5. **Edge.** One API gateway for external traffic: TLS termination, routing, OIDC token validation for end-user routes, coarse per-client rate limits. The auth policy is set per route: OIDC for customer and staff APIs; pass-through for signed webhooks, merchant API keys and the gateway's checkout URLs. Each system still authenticates and authorizes every request, and domain admission control (such as a flash-sale waiting room) stays in the system that owns the domain. Calls between systems use the internal network and each system's own credentials, not the public edge.
 6. **Observability.** One stack (OpenTelemetry collector, Prometheus, Grafana, Tempo, Loki) for all systems. Business ids cross system boundaries: the gateway's `merchant_order_id` is the order id, and scheduler jobs carry the order id as `correlation_id`.
-7. **Platform repository.** A fifth repository owns the compose file for all systems with a port plan, the edge gateway configuration, the identity-provider realm, broker topics and ACLs as code, the observability stack, shared Terraform (network, cluster), cross-system end-to-end tests, and this ADR once the repository exists.
+7. **Scope of this repository.** It builds only the e-commerce system and requires no change to the sibling projects (confirmed 2026-10-02). Ecosystem-wide assets (edge gateway configuration, identity-provider realm, broker ACLs, one observability stack for all systems, a compose file for all four, shared Terraform) belong in a platform repository, deferred until a second system needs them. Until then, this repository's compose file runs what this system needs, and an optional profile runs the real gateway and scheduler on their own host ports.
 
 ## Trade-offs
 
-- Five repositories, and the contracts between them, must be kept in step. Contract tests and versioned schemas are the price of independent releases.
+- Several repositories, and the contracts between them, must be kept in step. Contract tests and versioned schemas are the price of independent releases.
 - The full local stack (four systems plus infrastructure) is heavy. Standalone mode with fakes keeps day-to-day development light.
 - Shared servers are still shared failure domains locally. That is acceptable for development, not for production payments.
-- Changes this ecosystem needs in sibling projects (ADR-003) cross repository boundaries. Each such change gets an ADR in the repository that owns it.
+- Improvements in sibling projects would simplify this one (an HTTP executor in the scheduler, a merchant listing API in the gateway), but none is required. Any such change gets an ADR in the repository that owns it.
 
 ## Consequences
 
 - This system ships fakes for the gateway and the scheduler, plus contract tests against their published contracts: the gateway's `docs/openapi.yaml` and the scheduler's `api/openapi.yaml`.
 - Ride-hailing can join the same way, as the gateway's second merchant and the scheduler's second tenant.
-- The broker product, edge gateway product and container runtime are decided once for the platform, not per system.
+- The broker product, edge gateway product and container runtime are chosen at this project's Technology Selection, and reused if the platform repository is created.
