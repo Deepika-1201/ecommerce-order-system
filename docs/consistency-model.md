@@ -24,7 +24,7 @@
 | Search results | Full-text columns in `catalog` | Catalog, same transaction | Strong in V1 | 0 | Becomes eventual if search moves to a separate engine |
 | Price of an order | Quote, copied into the order | Pricing, then Ordering | Fixed at placement | — | A quote holds its prices until `valid_until` (10 min), even if list prices change |
 | Coupon usage | `pricing.coupons` | Pricing | Strong (conditional update) | 0 | Same pattern as stock |
-| Cart | `cart.carts` | Cart | Strong per cart (optimistic lock) | 0 | Concurrent edits from two tabs: the second gets `409` and re-reads |
+| Cart | `cart.carts` | Cart | Strong per cart (row lock and version) | 0 | Each write sets one line's quantity under the cart's row lock, so two tabs never lose each other's lines; `If-Match` makes a write conditional (`412`) ([LLD §4.3](low-level-design.md#43-carts)) |
 | Order status | `ordering.orders` | Order saga | Strong per order; eventual relative to payment and shipment facts | Seconds normally; at most the deadline | A customer can see `AWAITING_PAYMENT` for a few seconds after paying |
 | Payment status | The gateway; mirrored in `payments.payment_records` | Payments, from webhooks and polls | Eventual, monotonic by gateway `version` | Webhook latency; at most the hold expiry via polling | The gateway is authoritative for money |
 | Refund status | The gateway; mirrored in `payments.refunds` | Payments | Eventual | Webhook latency; daily reconciliation | Open refunds are reported until terminal |

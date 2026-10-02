@@ -20,4 +20,7 @@ Format: Context → Problem → Options considered → Decision → Trade-offs �
 | [ADR-014](ADR-014-deployment.md) | AWS ap-south-1 on EKS, provisioned with Terraform; environments on demand | Accepted |
 | [ADR-015](ADR-015-s3proxy-local-object-storage.md) | S3Proxy for local and test object storage, instead of the archived MinIO community edition | Accepted |
 | [ADR-016](ADR-016-openapi-from-code.md) | The OpenAPI document is generated from code, committed and checked in CI | Accepted |
-| [ADR-017](ADR-017-customer-resources-under-me.md) | Customer-owned resources are reached only through `/v1/me` | Accepted |
+| [ADR-017](ADR-017-customer-resources-under-me.md) | Customer-owned resources are reached only through `/v1/me` | Accepted, extended |
+| [ADR-018](ADR-018-gst-inclusive-prices.md) | GST is extracted per line from GST-inclusive prices, with the 2025 rates and slabs; shipping is taxed at the highest line rate | Accepted |
+| [ADR-019](ADR-019-rounding-and-allocation.md) | Integer paise, half-up rounding per line and tax component, largest-remainder discount allocation; totals are sums | Accepted |
+| [ADR-020](ADR-020-guest-cart-tokens.md) | Guest carts are opened by a secret cart token in a header, stored only as a hash | Accepted |

@@ -141,7 +141,7 @@ sequenceDiagram
     participant PR as Pricing
     participant P as Payments
     participant G as Payment Gateway
-    C->>API: POST /v1/carts/{id}/quote
+    C->>API: POST /v1/me/cart/quotes
     API->>PR: price the cart
     API-->>C: quote, valid 10 min
     C->>API: POST /v1/orders with quote id and Idempotency-Key

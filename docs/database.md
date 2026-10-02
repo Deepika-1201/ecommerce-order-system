@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Grows with each module's schema. Phase 2 (platform) and phase 3 (catalog, customer) |
+| Status | Grows with each module's schema. Phase 2 (platform), phase 3 (catalog, customer), phase 4 (cart, pricing) |
 | Decisions | [ADR-005](decisions/ADR-005-postgresql.md) (PostgreSQL, a schema per module), [ADR-008](decisions/ADR-008-transactional-outbox.md) (outbox), [ADR-010](decisions/ADR-010-idempotency.md) (idempotency) |
 
 ## 1. Conventions
@@ -66,3 +66,35 @@ erDiagram
 | `addresses` | `id`, `customer_id`, `recipient_name`, `phone`, `line1`, `line2`, `landmark`, `city`, `state_code` (GST state code), `pin_code`, `is_default`, `created_at`, `updated_at` | `(customer_id)` unique where `is_default`; `pin_code` checked (`^[1-9][0-9]{5}$`); `(customer_id, created_at)` |
 
 Account deletion (phase 13) anonymizes these rows instead of deleting them where orders still refer to the customer.
+
+## 5. `cart` (phase 4)
+
+```mermaid
+erDiagram
+    carts ||--o{ cart_lines : "cart_id"
+```
+
+| Table | Columns | Constraints and indexes |
+|---|---|---|
+| `carts` | `id`, `customer_id`, `guest_token_hash` (SHA-256 of the cart token), `coupon_code`, `version`, `created_at`, `updated_at`, `expires_at` | Exactly one of `customer_id` and `guest_token_hash`; each unique; `expires_at`, for the expiry task |
+| `cart_lines` | `cart_id`, `sku`, `quantity`, `added_price_paise`, `added_at`, `updated_at` | Primary key `(cart_id, sku)`; `quantity` between 1 and 10; deleted with their cart |
+
+Merged and expired carts are deleted, not kept with a status ([LLD §4.3](low-level-design.md#43-carts)).
+
+## 6. `pricing` (phase 4)
+
+```mermaid
+erDiagram
+    coupons ||--o{ coupon_redemptions : "coupon_id"
+    quotes ||--|{ quote_lines : "quote_id"
+```
+
+| Table | Columns | Constraints and indexes |
+|---|---|---|
+| `coupons` | `id`, `code`, `kind`, `percent_bps`, `max_discount_paise`, `amount_paise`, `min_order_paise`, `valid_from`, `valid_until`, `total_limit`, `per_customer_limit`, `active`, `reserved`, `redeemed`, `version`, `created_at`, `updated_at` | `code` unique; the rule fields match `kind`; `reserved` and `redeemed` at least 0; `reserved + redeemed ≤ total_limit` |
+| `coupon_redemptions` | `id`, `coupon_id`, `order_id`, `customer_id`, `status`, `created_at`, `updated_at` | `order_id` unique; `(coupon_id, customer_id)` partial on `HELD` and `COMMITTED`, for the per-customer limit |
+| `quotes` | `id`, `cart_id`, `customer_id`, `coupon_id`, `coupon_code`, `supply_state_code`, `delivery_state_code`, shipping fee with its taxable value, rate and tax, totals, `valid_until`, `created_at` | Read by id, with the owner columns in the condition; `valid_until`, for the purge task |
+| `quote_lines` | `quote_id`, `line_no`, `sku`, `product_id`, `variant_id`, `title`, `option_values` (`jsonb`), `image_key`, `quantity`, `unit_price_paise`, `previous_unit_price_paise`, `gross_paise`, `discount_paise`, `amount_paise`, `taxable_value_paise`, `gst_rate_bps`, `cgst_paise`, `sgst_paise`, `igst_paise` | Primary key `(quote_id, line_no)`; `taxable_value_paise + cgst_paise + sgst_paise + igst_paise = amount_paise` |
+
+- Quotes are immutable, and deleted a day after they expire; orders keep their own copy (phase 6).
+- The coupon counters are changed only by conditional updates ([LLD §4.10](low-level-design.md#410-coupon-redemptions)).

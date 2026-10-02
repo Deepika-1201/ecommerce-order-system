@@ -40,7 +40,7 @@ docs/
 | `platform` | `shared` |
 | `catalog`, `customer`, `inventory`, `payments`, `fulfillment` | `platform`, `shared` |
 | `pricing` | `catalog`, `platform`, `shared` |
-| `cart` | `catalog`, `pricing`, `platform`, `shared` |
+| `cart` | `catalog`, `customer` (from phase 4, [§4.2](#42-module-boundaries)), `pricing`, `platform`, `shared` |
 | `ordering` | `pricing`, `customer`, `inventory`, `payments`, `fulfillment`, `platform`, `shared` |
 | `notifications` | `ordering`, `customer`, `platform`, `shared` |
 
@@ -486,7 +486,7 @@ erDiagram
 - **Category:** name, slug (unique) and parent; at most 4 levels.
 - **Product** (aggregate root, with its variants and images): title, description, category, GST category, option dimensions, status and version.
 - **Options:** up to 3 dimensions (such as `size` and `color`), each with up to 30 values. Dimensions are fixed once the product has variants; values can be added at any time.
-- **Variant (SKU):** a unique SKU code, one value per dimension, a list price in paise, and status `ACTIVE` or `INACTIVE`. A product without dimensions has exactly one variant; no product has more than 100.
+- **Variant (SKU):** a unique SKU code, one value per dimension, a list price in paise including GST ([ADR-018](decisions/ADR-018-gst-inclusive-prices.md)), and status `ACTIVE` or `INACTIVE`. A product without dimensions has exactly one variant; no product has more than 100.
 - **GST category:** `STANDARD`, `REDUCED`, `EXEMPT`, `APPAREL`, `FOOTWEAR` or `DEMERIT`. Catalog only classifies; Pricing maps each category to its rate rule in phase 4, including the price-dependent rules for apparel and footwear.
 
 | Invariant | Enforced by |
@@ -671,3 +671,298 @@ The CI container job runs the same script against the compose stack.
 |---|---|
 | API tests for catalog and customers | The tests above |
 | Cross-customer access is refused | `CrossCustomerAccessTests`, and the demo script against the real Keycloak in CI |
+
+## 4. Cart, pricing and coupons (phase 4)
+
+### 4.1 Scope
+
+Phase 4 delivers:
+
+- **Carts** for customers (`/v1/me/cart`) and guests (`/v1/guest/cart`, opened by a cart token, [ADR-020](decisions/ADR-020-guest-cart-tokens.md)), merged at sign-in and expired after inactivity (Q6).
+- **Quotes:** a cart priced for a delivery state, with the coupon discount allocated to lines, GST per line, a shipping fee and totals, valid for 10 minutes ([ADR-018](decisions/ADR-018-gst-inclusive-prices.md), [ADR-019](decisions/ADR-019-rounding-and-allocation.md)).
+- **Coupons:** an admin API, and redemption counters that keep `reserved + redeemed ≤ total_limit` under concurrency.
+- **Module APIs:** SKU details from Catalog, the caller's customer id from Customer, and quotes and coupon redemptions from Pricing.
+
+Not yet:
+
+- placing an order from a quote, `quote_already_used`, and the `ReserveCoupon`, `CommitCoupon` and `ReleaseCoupon` messages that will call the redemption operations (phase 6);
+- stock: carts never hold it (FR-CRT3), and only placement checks it (phases 5 and 6);
+- lower per-line caps for flash-sale SKUs (phase 16).
+
+### 4.2 Module boundaries
+
+| Module | New API (base package) | Used by |
+|---|---|---|
+| Catalog | `SkuCatalog.find(skus)`: per SKU, the product and variant ids, title, option values, first image, list price, GST category, and whether it can be bought now. `GstCategory` moves here from `catalog.domain` | Cart, Pricing |
+| Customer | `Customers.idOf(caller)`: the caller's customer id, creating the profile on first use | Cart; Ordering in phase 6 |
+| Pricing | `Quotes`: create a quote; find one for its owner. `CouponRedemptions`: reserve, commit and release one use of a coupon for an order | Cart; Ordering in phase 6 |
+
+- **Cart now depends on Customer,** so that carts are owned by the customer id that every other module uses ([§1.2](#12-modules-and-their-boundaries) is updated).
+- **No transaction spans two modules.** Quoting reads the cart, then calls Pricing, which stores the quote in its own transaction. Cart's other calls to Catalog and Pricing are read-only queries.
+
+### 4.3 Carts
+
+| Rule | How it holds |
+|---|---|
+| One cart per customer, one per guest token | Unique `customer_id`; unique token hash |
+| One line per SKU, 1–10 units | The line's key is (cart, SKU); a check constraint on the quantity |
+| At most 50 lines | Every write locks the cart row, then counts (`409 cart_full`) |
+| Only purchasable SKUs can be added | An active variant of an active product. Anything else is `422 item_unavailable`, so drafts stay invisible |
+| Expiry after inactivity: 30 days for guests, 90 for customers | Every write and every quote moves `expires_at`; an hourly task deletes expired carts |
+
+- **Writes set a line's quantity** (`PUT /lines/{sku}`), so a retried request changes nothing. An "add one" request could not promise that.
+- **Concurrent edits** lock the cart row and increment its version, so two tabs never lose each other's lines. `If-Match` with the cart's `ETag` makes a write conditional (`412 precondition_failed`). It is optional because every write names a single line. This replaces the "second tab gets `409` and re-reads" of the [consistency model](consistency-model.md), which is updated.
+- **Price changes are shown** (FR-CHK1): a line keeps the list price from when it was added, and the cart and the quote show both prices when they differ.
+- **Reading a cart** shows current prices and whether each line can still be bought. Those prices are indicative; only a quote is binding.
+- **A customer's cart is created by its first write.** Reading before that returns an empty cart at version 0.
+- **No status column.** A merged or expired cart is deleted at once, because nothing reads a dead cart, so the domain model's `MERGED` and `EXPIRED` are deletions. Phase 6 decides what placement does to the cart (`CHECKED_OUT`).
+
+### 4.4 Guest carts and merging
+
+Per [ADR-020](decisions/ADR-020-guest-cart-tokens.md):
+
+- `POST /v1/guest/cart` creates a cart and returns its **cart token**, once: 32 random bytes, base64url without padding (43 characters).
+- Every other guest call sends the token in the `Cart-Token` header. Only its SHA-256 hash is stored; it is never logged, and it opens only its own cart. An unknown token is `404`, a missing one `400`.
+- The token dies with its cart: when the cart is merged, or after 30 days without activity.
+
+**Merging** is `POST /v1/me/cart/merge` with the guest's `Cart-Token`, called right after sign-in (FR-CRT2):
+
+```mermaid
+flowchart TD
+    lock["Lock the customer's cart (created if missing), then the guest cart"] --> found{"Guest cart found?"}
+    found -->|"no: a retry, or expired"| same["Return the customer's cart unchanged"]
+    found -->|yes| lines["Each guest line replaces the customer's line for that SKU"]
+    lines --> full{"More than 50 lines?"}
+    full -->|yes| refuse["409 cart_full; both carts unchanged"]
+    full -->|no| coupon["The guest's coupon, if any, replaces the customer's"]
+    coupon --> drop["Delete the guest cart, which ends its token"]
+    drop --> merged["Return the merged cart"]
+```
+
+- **The guest's quantities win,** because they are the latest intent. Adding them up would double an item the customer added on two devices.
+- **Merging is idempotent:** a retried merge, or one with an expired token, finds no guest cart and changes nothing.
+- **Lock order:** the customer's cart, then the guest cart. Guest writes lock only the guest cart, so the two can't deadlock.
+
+### 4.5 Quotes
+
+`POST /v1/me/cart/quotes` (or `/v1/guest/cart/quotes`) with `{"delivery_state_code": "27"}`:
+
+1. Cart reads its lines. An empty cart is `409 cart_empty`.
+2. Pricing reads the SKUs from Catalog. A line that can no longer be bought fails the quote: `409 cart_has_unavailable_items`, naming the SKUs.
+3. Pricing checks the coupon (§4.9), prices the cart, stores the quote and returns it. Cart then moves its expiry.
+
+```mermaid
+flowchart LR
+    gross["Gross per line<br/>list price × quantity"] --> discount["Coupon discount<br/>allocated to lines (§4.7)"]
+    discount --> rate["GST rate per line<br/>category, value per piece (§4.6)"]
+    rate --> tax["Tax extracted from<br/>the line amount (§4.7)"]
+    tax --> shipping["Shipping fee<br/>and its tax (§4.8)"]
+    shipping --> totals["Totals: sums of the parts"]
+```
+
+- **A quote is immutable** and valid for 10 minutes (`valid_until`). Placement copies its lines into the order, so changes to the cart after quoting don't matter.
+- **The delivery state** sets the tax regime. Placement checks that the delivery address is in that state (phase 6).
+- **Owner:** a quote belongs to its cart, and for a customer also to the customer. `GET /v1/me/cart/quotes/{id}`, and its guest equivalent, find it only for that owner; anything else is `404`.
+- **Lines carry everything an order snapshot needs:** SKU, product and variant ids, title, option values, image, quantity, unit price (and the earlier one when it changed), gross amount, discount share, line amount, taxable value, GST rate, and CGST, SGST and IGST.
+- **Retention:** an hourly task deletes quotes a day after they expire. Orders keep their own copy.
+
+### 4.6 GST
+
+Per [ADR-018](decisions/ADR-018-gst-inclusive-prices.md):
+
+- **List prices include GST,** as Indian consumers expect and as packaged goods must show. Tax is extracted from each line's amount after its discount share.
+- **Place of supply:** the warehouse's state (`ecom.pricing.ship-from-state`; one warehouse in V1, Q8) against the delivery state. The same state gives CGST and SGST at half the rate each; different states give IGST at the full rate.
+- **Rates,** in force since 22 September 2025:
+
+| GST category | Rate |
+|---|---|
+| `EXEMPT` | 0% |
+| `REDUCED` | 5% |
+| `STANDARD` | 18% |
+| `DEMERIT` | 40% |
+| `APPAREL`, `FOOTWEAR` | 5% when the value per piece (per pair for footwear), excluding GST, is at most ₹2,500; otherwise 18% |
+
+- **The apparel and footwear threshold** applies to the value per piece after the discount share, taxed at 5%. A line qualifies when it costs at most ₹2,625 per piece (₹2,500 plus 5%), compared in integers as `amount ≤ 262,500 × quantity`. So a ₹2,699 shirt is taxed at 18%, but with a ₹100 discount share it costs ₹2,599 and is taxed at 5%.
+- **Shipping** is taxed at the highest rate among the quote's lines. With only exempt goods, it is untaxed.
+- **Rates are code,** with their effective date and tests. A change by the GST Council ships as a release.
+
+### 4.7 Rounding and allocation
+
+Per [ADR-019](decisions/ADR-019-rounding-and-allocation.md), every amount is integer paise, and no total is rounded on its own: totals are sums of rounded parts, so they always add up.
+
+| Step | Rule |
+|---|---|
+| Percentage discount | `floor(gross subtotal × basis points / 10,000)`, then the cap. A "10% off" never exceeds 10% |
+| Any discount | At most the gross subtotal minus ₹1, so the goods are never free and every payment is at least ₹1 |
+| Allocation to lines | In proportion to each line's gross amount, by the largest-remainder method: each line gets the floor of its exact share, and the leftover paise go one each to the lines with the largest fractions, earlier lines first on ties. The shares add up to the discount exactly, and each is within one paise of exact |
+| Tax, inter-state | `IGST = round_half_up(amount × rate / (100 + rate))` |
+| Tax, intra-state | `CGST = SGST = round_half_up(amount × rate / (2 × (100 + rate)))`. One half is computed and used twice, so the two are always equal |
+| Taxable value | `amount − tax`, so taxable value plus tax is exactly what the customer pays for the line |
+| Integer arithmetic | `round_half_up(a / b) = floor((2a + b) / 2b)`, with `BigInteger` where a product could overflow a `long` |
+
+Recomputing tax from the taxable value can differ from the stored tax by up to one paise per component. The line amount, which the customer sees, is the source of truth.
+
+**Worked example 1:** Karnataka (`29`) to Karnataka, with a coupon "10% off, up to ₹500". Amounts in paise.
+
+| Line | Gross | Exact share | Discount | Amount | Rate | CGST | SGST | Taxable value |
+|---|---|---|---|---|---|---|---|---|
+| Shirt (`APPAREL`), ₹1,299 × 2 | 259,800 | 19,399.64 | 19,400 | 240,400 | 5% (₹1,202 per piece) | 5,724 | 5,724 | 228,952 |
+| Shoes (`FOOTWEAR`), ₹3,499 × 1 | 349,900 | 26,127.54 | 26,127 | 323,773 | 18% (₹3,237.73 per pair) | 24,695 | 24,695 | 274,383 |
+| Bottle (`STANDARD`), ₹599 × 1 | 59,900 | 4,472.82 | 4,473 | 55,427 | 18% | 4,227 | 4,227 | 46,973 |
+| **Total** | **669,600** | | **50,000** | **619,600** | | **34,646** | **34,646** | **550,308** |
+
+- 10% of 669,600 is 66,960, so the cap applies and the discount is 50,000.
+- The floors of the exact shares add up to 49,998. The two leftover paise go to the bottle (fraction 0.82) and the shirts (0.64).
+- Shipping is free, because the goods total after discount is over ₹499.
+- The grand total, 619,600, equals the taxable value plus CGST plus SGST: 550,308 + 34,646 + 34,646.
+
+**Worked example 2:** Karnataka to Maharashtra (`27`), no coupon, one `REDUCED` item at ₹349. Amounts in paise.
+
+| Part | Amount | Rate | IGST | Taxable value |
+|---|---|---|---|---|
+| Line | 34,900 | 5% | 1,662 | 33,238 |
+| Shipping (goods under ₹499) | 4,900 | 5%, the highest line rate | 233 | 4,667 |
+| **Grand total** | **39,800** | | **1,895** | **37,905** |
+
+Both examples are unit tests, to the paise.
+
+### 4.8 Shipping fee
+
+- A flat fee, `ecom.pricing.shipping.fee-paise` (₹49, GST-inclusive), waived when the goods total after discount reaches `ecom.pricing.shipping.free-from-paise` (₹499).
+- It is its own part of the quote with its own tax (§4.6), not spread over the lines.
+
+### 4.9 Coupons
+
+V1 has one coupon type with a redemption limit (Q3):
+
+| Field | Rule |
+|---|---|
+| `code` | 4–20 letters, digits and hyphens, upper-cased, unique |
+| `kind` | `PERCENT`, with basis points (1–10,000) and an optional cap in paise; or `FLAT`, with an amount in paise |
+| `min_order_paise` | The gross subtotal needed; 0 by default |
+| `valid_from`, `valid_until` | The window; open-ended by default |
+| `total_limit` | Uses across all orders; unlimited if absent |
+| `per_customer_limit` | Uses per customer; unlimited if absent |
+| `active` | Admins switch a coupon off instead of deleting it |
+
+- **The rule is fixed once created.** Admins can change only `active`, `valid_until` and `total_limit`, and never below current usage (`409 limit_below_usage`). A different rule is a new code, so a quote always matches its coupon.
+- **Per-customer limits need a signed-in customer.** A guest could start again under any email, so such a coupon on a guest cart is `422 coupon_requires_sign_in`.
+- **When it is checked:** applying a code checks that it exists, is active and in its window, and the sign-in rule. Quoting also checks the minimum order and both limits, counting held and committed uses. Only the reservation at placement is binding.
+- **Admin changes are audited.**
+
+| Code | Status | When |
+|---|---|---|
+| `coupon_not_found` | 422 | Unknown, or switched off |
+| `coupon_not_yet_valid`, `coupon_expired` | 422 | Outside its window |
+| `coupon_requires_sign_in` | 422 | A per-customer limit on a guest cart |
+| `coupon_minimum_not_met` | 422 | The gross subtotal is below the minimum, which the detail names |
+| `coupon_exhausted` | 409 | `total_limit` reached |
+| `coupon_already_used` | 409 | The customer's `per_customer_limit` reached |
+
+### 4.10 Coupon redemptions
+
+The pattern of stock reservations ([ADR-009](decisions/ADR-009-inventory-reservation.md)): counters changed by a conditional update, and one record per order.
+
+```mermaid
+stateDiagram-v2
+    [*] --> HELD : reserve, at placement
+    HELD --> COMMITTED : commit, after payment
+    HELD --> RELEASED : release, order rejected or cancelled
+    COMMITTED --> RELEASED : release, paid order cancelled
+    COMMITTED --> [*]
+    RELEASED --> [*]
+```
+
+**Reserve**, in one transaction:
+
+1. If the order already has a redemption, return its outcome. The order id is unique, so reserving is idempotent.
+2. `UPDATE coupons SET reserved = reserved + 1 WHERE id = :id AND active AND now() is in the window AND (total_limit IS NULL OR reserved + redeemed < total_limit)`. No row updated means unavailable.
+3. That update holds the coupon's row lock until commit, so reservations of one coupon run one at a time. The customer's held and committed uses are then counted against `per_customer_limit` without a race; over the limit rolls back.
+4. Insert the redemption as `HELD`.
+
+- **Commit:** `HELD` to `COMMITTED`, with `reserved − 1` and `redeemed + 1`. **Release:** `HELD` or `COMMITTED` to `RELEASED`, giving the use back. Both are guarded by the status, so repeating them changes nothing.
+- **Invariants:** `reserved ≥ 0`, `redeemed ≥ 0` and `reserved + redeemed ≤ total_limit` are also `CHECK` constraints. `reserved` equals the number of `HELD` redemptions, and `redeemed` the number of `COMMITTED` ones.
+- **Outcomes,** for phase 6: `HELD`, or unavailable with a reason (`INACTIVE`, `OUTSIDE_WINDOW`, `EXHAUSTED`, `ALREADY_USED`), which rejects the order with `COUPON_UNAVAILABLE`.
+- A popular coupon serializes its reservations on one row, each holding the lock for one short transaction, as a hot SKU does.
+
+### 4.11 API
+
+| Endpoint | Access | Purpose |
+|---|---|---|
+| `GET /v1/me/cart` | `customer` | The cart, with current prices |
+| `PUT /v1/me/cart/lines/{sku}` | `customer` | Set a line's quantity (1–10), adding the line if needed |
+| `DELETE /v1/me/cart/lines/{sku}` | `customer` | Remove a line |
+| `PUT /v1/me/cart/coupon`, `DELETE /v1/me/cart/coupon` | `customer` | Apply or remove the coupon |
+| `POST /v1/me/cart/merge` | `customer`, with `Cart-Token` | Merge a guest cart |
+| `POST /v1/me/cart/quotes` | `customer` | Quote the cart (`201`) |
+| `GET /v1/me/cart/quotes/{id}` | `customer` | Read one of the customer's quotes |
+| `POST /v1/guest/cart` | Anyone | Create a guest cart; the response holds its token, once |
+| `GET /v1/guest/cart`, and the line, coupon and quote endpoints above under `/v1/guest/cart` | Anyone, with `Cart-Token` | The same, for a guest cart |
+| `GET`, `POST /v1/admin/pricing/coupons`; `GET`, `PATCH /v1/admin/pricing/coupons/{id}` | `admin` | Manage coupons |
+
+- Cart responses carry an `ETag` (the cart's version) and `Cache-Control: no-store`.
+- `/v1/guest/**` needs no access token: the cart token is the credential, and Cart checks it.
+- The checkout sketch in the architecture (`POST /v1/carts/{id}/quote`) becomes `POST /v1/me/cart/quotes`, because ADR-017 keeps cart ids out of customer paths.
+
+New error codes, besides the coupon codes of §4.9: `cart_full`, `cart_empty`, `cart_has_unavailable_items`, `coupon_code_taken` and `limit_below_usage` (409); `item_unavailable` (422).
+
+### 4.12 Database
+
+```mermaid
+erDiagram
+    carts ||--o{ cart_lines : "cart_id"
+    coupons ||--o{ coupon_redemptions : "coupon_id"
+    quotes ||--|{ quote_lines : "quote_id"
+```
+
+| Schema | Tables |
+|---|---|
+| `cart` | `carts`: owner (`customer_id` or `guest_token_hash`), `coupon_code`, `version`, `expires_at`. `cart_lines`: `sku`, `quantity`, `added_price_paise` |
+| `pricing` | `coupons`: rule, window, limits, counters `reserved` and `redeemed`. `coupon_redemptions`: `order_id` (unique), status. `quotes`: owner, states, coupon, shipping, totals, `valid_until`. `quote_lines` |
+
+Columns and constraints are in [database.md](database.md). SKUs, customer ids and order ids are plain values, since foreign keys stay inside a schema.
+
+### 4.13 Configuration
+
+| Property | Default | Notes |
+|---|---|---|
+| `ecom.pricing.ship-from-state` | `29` (Karnataka) | The warehouse's GST state code; checked at startup |
+| `ecom.pricing.quote-validity` | `10m` | |
+| `ecom.pricing.shipping.fee-paise` | `4900` | ₹49, GST-inclusive |
+| `ecom.pricing.shipping.free-from-paise` | `49900` | ₹499 of goods after discount |
+| `ecom.cart.guest-lifetime`, `ecom.cart.customer-lifetime` | `30d`, `90d` | Inactivity before a cart expires (Q6) |
+
+### 4.14 Demo
+
+`scripts/demo-cart.sh`, which the CI container job also runs:
+
+1. An admin creates a product and a coupon.
+2. A guest fills a cart, applies the coupon and gets a quote.
+3. Asha signs in and merges the guest cart into hers; the guest token stops working.
+4. Asha gets a quote for another state: IGST instead of CGST and SGST.
+5. Ravi cannot see Asha's cart or her quote.
+
+### 4.15 Tests
+
+Property tests use jqwik 1.10, which runs on JUnit 6. A spike on 2026-10-02 showed it running there and shrinking a deliberately false property to its boundary. Its failure database is kept under `build/`.
+
+| Test | Proves |
+|---|---|
+| `QuoteCalculatorProperties` | For random carts (1–50 lines, 1–10 units, prices from 1 paise to ₹1 crore, every GST category), coupons and both regimes: the grand total is the sum of the line amounts and shipping, and also of the taxable values and taxes; each line's taxable value plus tax is its amount; CGST equals SGST; discount shares add up to the discount and are each within a paise of exact; each tax component is within half a paise of exact; the slab rule holds; the grand total is at least ₹1 |
+| `QuoteCalculatorTests` | The worked examples of §4.7, to the paise |
+| `GstRatesTests`, `AllocationTests` | Slab boundaries (₹2,625.00 per piece is 5%, ₹2,625.01 is 18%); allocation with ties and caps |
+| `CartTests`, `GuestCartTests` | Lines, limits, unavailable SKUs, earlier prices, `If-Match`, coupons; the cart token is issued once, required, and `404` when unknown |
+| `CartMergeTests` | The merge rules, a retried merge, `cart_full` |
+| `QuoteTests` | Quotes from carts: unavailable items, coupon errors, price changes, validity, owner-scoped reads |
+| `CrossOwnerCartTests` | Customer B, another guest's token, and a guest token used on `/v1/me` never reach customer A's cart or quotes |
+| `CouponAdminTests` | Validation, unique codes, the mutable fields, `limit_below_usage`, admin only, audit |
+| `CouponRedemptionTests` | 20 concurrent reservations of the last use give exactly one `HELD`; the per-customer limit holds under concurrency; reserve, commit and release are idempotent; the counters equal the redemptions |
+| `CartExpiryTests` | Expired carts and old quotes are deleted by their tasks, and nothing else |
+
+### 4.16 Exit criteria
+
+| Criterion | Shown by |
+|---|---|
+| Property tests: totals equal the sum of their parts; rounding rules hold | `QuoteCalculatorProperties`, with the worked examples as fixed points |
+| Coupon limits hold under concurrency | `CouponRedemptionTests` |
+| Carts are reachable only by their owner ([ADR-017](decisions/ADR-017-customer-resources-under-me.md), [ADR-020](decisions/ADR-020-guest-cart-tokens.md)) | `CrossOwnerCartTests`, and the demo against Keycloak in CI |

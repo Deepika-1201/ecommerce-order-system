@@ -40,3 +40,7 @@ How do customer-facing endpoints address resources so that one customer can neve
 
 - Every phase that adds a customer resource adds a cross-customer test: customer B uses customer A's resource ids and gets `404`.
 - Identifiers stay unguessable (UUIDv7) as a second line of defense, not the first.
+
+## Extension (2026-10-02, phase 4)
+
+Guests have carts too. They reach them through `/v1/guest/cart` with a secret cart token in a header, never with a cart id in the path ([ADR-020](ADR-020-guest-cart-tokens.md)). Customers reach theirs through `/v1/me/cart`.
