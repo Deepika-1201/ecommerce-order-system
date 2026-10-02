@@ -32,8 +32,11 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 
-/** How MVC errors are rendered. Security is left out of this slice; its errors are covered by the token tests. */
-@WebMvcTest(properties = "spring.autoconfigure.exclude="
+/**
+ * How MVC errors are rendered, through a fixture controller only. Security is left out of this slice; its errors are
+ * covered by the token tests.
+ */
+@WebMvcTest(controllers = ProblemDetailsTests.ProblemFixtureController.class, properties = "spring.autoconfigure.exclude="
         + "org.springframework.boot.security.oauth2.server.resource.autoconfigure.OAuth2ResourceServerAutoConfiguration,"
         + "org.springframework.boot.security.oauth2.server.resource.autoconfigure.web."
         + "OAuth2ResourceServerWebSecurityAutoConfiguration")
