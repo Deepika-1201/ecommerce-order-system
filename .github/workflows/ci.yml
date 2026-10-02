@@ -39,7 +39,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
-      - name: Start PostgreSQL and the app
+      - name: Start the stack (PostgreSQL, Keycloak, S3Proxy, the app)
         run: docker compose up --build --detach
       - name: Wait for readiness
         run: |
@@ -54,6 +54,17 @@ jobs:
         run: |
           curl -fsS localhost:8081/actuator/info | grep -q '"roles":\["api","worker"\]'
           curl -sS localhost:8080/v1/nothing-here | grep -q '"code":"unauthorized"'
+      - name: Wait for Keycloak
+        run: |
+          for attempt in $(seq 1 90); do
+            if curl -fsS -o /dev/null localhost:8180/realms/ecommerce/.well-known/openid-configuration; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: Phase 3 demo (tokens, catalog, image upload, browsing, addresses)
+        run: scripts/demo-catalog.sh
       - name: Show logs
         if: failure()
         run: docker compose logs

@@ -20,10 +20,27 @@ JDK 25 is required; Docker is optional.
 ./gradlew build          # compile (-Werror), module-boundary and architecture checks, all tests
 ./gradlew bootTestRun    # run locally on embedded PostgreSQL: API on :8080, health and info on :8081
 ./gradlew updateOpenApi  # after an API change: regenerate docs/api/openapi.json (the build fails while it is stale)
-docker compose up --build   # or: PostgreSQL 17 and the app in containers, with JSON logs
+docker compose up --build   # or: the whole stack in containers, with JSON logs
 ```
 
 `ECOM_ROLES` selects what an instance runs: `api`, `worker`, or both (the default).
+
+### Local stack and demo
+
+`docker compose up --build --detach` starts PostgreSQL, Keycloak on `:8180` (realm `ecommerce`, imported from [deploy/keycloak](deploy/keycloak/ecommerce-realm.json)), S3Proxy on `:9000` with the `ecommerce-media` bucket, and the app. Then:
+
+```bash
+scripts/demo-catalog.sh   # tokens, catalog admin, an image upload, anonymous browsing and search, addresses (curl and python3)
+```
+
+| User | Password | Role |
+|---|---|---|
+| `asha`, `ravi` | `asha-local-only`, `ravi-local-only` | `customer` |
+| `admin` | `admin-local-only` | `admin` |
+
+These exist only in the local realm, whose `ecommerce-cli` client allows the password grant for scripts. To get a token: `curl -d grant_type=password -d client_id=ecommerce-cli -d username=asha -d password=asha-local-only localhost:8180/realms/ecommerce/protocol/openid-connect/token`.
+
+To use them with `./gradlew bootTestRun` instead of the app container, start only the dependencies: `docker compose up --detach keycloak s3proxy media-bucket`. The `local` profile points the app at them.
 
 ## Documentation
 

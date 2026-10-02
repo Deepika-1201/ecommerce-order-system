@@ -18,19 +18,76 @@ services:
       timeout: 3s
       retries: 20
 
+  # Identity provider (LLD §3.2). Tokens are issued for http://localhost:8180; the app reads keys over the network.
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+    ports:
+      - "8180:8080"
+    volumes:
+      - ./deploy/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  # Object storage with the S3 API (ADR-015). Upload URLs are signed for localhost:9000, which the host reaches.
+  s3proxy:
+    image: andrewgaul/s3proxy:4.1.1
+    environment:
+      S3PROXY_IDENTITY: local-access-key
+      S3PROXY_CREDENTIAL: local-secret-key
+    ports:
+      - "9000:80"
+    volumes:
+      - media-data:/data
+    healthcheck:
+      interval: 2s
+      retries: 30
+
+  # Creates the media bucket once; an existing bucket (409) is fine.
+  media-bucket:
+    image: curlimages/curl:8.22.0
+    depends_on:
+      s3proxy:
+        condition: service_healthy
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        code=$$(curl -sS -o /dev/null -w '%{http_code}' -X PUT --aws-sigv4 'aws:amz:ap-south-1:s3'
+        --user local-access-key:local-secret-key http://s3proxy:80/ecommerce-media)
+        && echo "create bucket ecommerce-media: HTTP $$code"
+        && { [ "$$code" = 200 ] || [ "$$code" = 409 ]; }
+
   app:
     build: .
     depends_on:
       postgres:
         condition: service_healthy
+      media-bucket:
+        condition: service_completed_successfully
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/ecommerce
       DB_USER: ecommerce
       DB_PASSWORD: ecommerce
       ECOM_ROLES: api,worker
+      ECOM_SECURITY_JWK_SET_URI: http://keycloak:8080/realms/ecommerce/protocol/openid-connect/certs
+      ECOM_MEDIA_ENDPOINT: http://s3proxy:80
+      ECOM_MEDIA_PRESIGN_ENDPOINT: http://localhost:9000
+      ECOM_MEDIA_PATH_STYLE: "true"
+      ECOM_MEDIA_ACCESS_KEY: local-access-key
+      ECOM_MEDIA_SECRET_KEY: local-secret-key
     ports:
       - "8080:8080"
       - "8081:8081"
 
 volumes:
   postgres-data:
+  media-data:

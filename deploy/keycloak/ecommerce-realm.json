@@ -1,0 +1,89 @@
+{
+  "realm": "ecommerce",
+  "displayName": "E-commerce (local only)",
+  "enabled": true,
+  "registrationAllowed": false,
+  "roles": {
+    "realm": [
+      { "name": "customer", "description": "Shops; owns /v1/me" },
+      { "name": "support", "description": "Customer support staff" },
+      { "name": "warehouse", "description": "Warehouse staff" },
+      { "name": "admin", "description": "Store administration" }
+    ]
+  },
+  "defaultRole": {
+    "name": "default-roles-ecommerce",
+    "description": "New users are customers",
+    "composite": true,
+    "composites": { "realm": ["customer"] }
+  },
+  "clients": [
+    {
+      "clientId": "ecommerce-api",
+      "name": "E-commerce API: the token audience, no login flows",
+      "enabled": true,
+      "bearerOnly": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "ecommerce-cli",
+      "name": "Local scripts: password grant, this local realm only",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocolMappers": [
+        {
+          "name": "audience ecommerce-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "ecommerce-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "asha",
+      "enabled": true,
+      "email": "asha@example.com",
+      "emailVerified": true,
+      "firstName": "Asha",
+      "lastName": "Rao",
+      "credentials": [{ "type": "password", "value": "asha-local-only", "temporary": false }],
+      "realmRoles": ["customer"]
+    },
+    {
+      "username": "ravi",
+      "enabled": true,
+      "email": "ravi@example.com",
+      "emailVerified": true,
+      "firstName": "Ravi",
+      "lastName": "Kumar",
+      "credentials": [{ "type": "password", "value": "ravi-local-only", "temporary": false }],
+      "realmRoles": ["customer"]
+    },
+    {
+      "username": "admin",
+      "enabled": true,
+      "email": "admin@example.com",
+      "emailVerified": true,
+      "firstName": "Store",
+      "lastName": "Admin",
+      "credentials": [{ "type": "password", "value": "admin-local-only", "temporary": false }],
+      "realmRoles": ["admin"]
+    }
+  ]
+}
