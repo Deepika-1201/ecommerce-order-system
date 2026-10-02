@@ -3,6 +3,7 @@ package com.ecommerce.platform.idempotency;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecommerce.platform.ApiController;
+import com.ecommerce.platform.HttpAccessRules;
 import com.ecommerce.platform.IdempotentRequest;
 import com.ecommerce.platform.IdempotentRequests;
 import com.ecommerce.support.IntegrationTest;
@@ -18,6 +19,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestComponent;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -27,7 +30,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 
 /** API idempotency keys end to end over HTTP (ADR-010, LLD §2.8). */
-@Import(IdempotentRequestsTests.OrderFixtureController.class)
+@Import({IdempotentRequestsTests.OrderFixtureController.class, IdempotentRequestsTests.FixtureAccess.class})
 class IdempotentRequestsTests extends IntegrationTest {
 
     private static final String PATH = "/test/idempotent-orders";
@@ -209,6 +212,16 @@ class IdempotentRequestsTests extends IntegrationTest {
     }
 
     record OrderRequest(String item, int quantity) {
+    }
+
+    /** The fixture stands in for a customer endpoint; the caller arrives in a header instead of a token. */
+    @TestConfiguration(proxyBeanMethods = false)
+    static class FixtureAccess {
+
+        @Bean
+        HttpAccessRules idempotentOrderFixtureAccess() {
+            return rules -> rules.requestMatchers(PATH).permitAll();
+        }
     }
 
     record PlacedOrder(UUID orderId, String item) {

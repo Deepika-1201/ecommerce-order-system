@@ -35,6 +35,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-kafka")
+    implementation("org.springframework.boot:spring-boot-starter-security-oauth2-resource-server")
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.springframework.modulith:spring-modulith-api")
     implementation("org.postgresql:postgresql")

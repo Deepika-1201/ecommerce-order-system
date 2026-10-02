@@ -53,7 +53,7 @@ jobs:
       - name: Check the roles and the error model
         run: |
           curl -fsS localhost:8081/actuator/info | grep -q '"roles":\["api","worker"\]'
-          curl -sS localhost:8080/v1/nothing-here | grep -q '"code":"not_found"'
+          curl -sS localhost:8080/v1/nothing-here | grep -q '"code":"unauthorized"'
       - name: Show logs
         if: failure()
         run: docker compose logs

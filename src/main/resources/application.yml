@@ -15,6 +15,14 @@ spring:
   jackson:
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
+  # Tokens are validated against ecom.security (LLD §3.2); keys are fetched from the JWK set, never by discovery.
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${ecom.security.issuer}
+          jwk-set-uri: ${ecom.security.jwk-set-uri}
+          audiences: ${ecom.security.audience}
   # The outbox relay is the only producer (LLD §2.5). Kafka is not a readiness dependency: the outbox buffers.
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
@@ -32,6 +40,10 @@ server:
 
 ecom:
   roles: ${ECOM_ROLES:api,worker}
+  security:
+    issuer: ${ECOM_SECURITY_ISSUER:http://localhost:8180/realms/ecommerce}
+    jwk-set-uri: ${ECOM_SECURITY_JWK_SET_URI:http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs}
+    audience: ${ECOM_SECURITY_AUDIENCE:ecommerce-api}
 
 management:
   server:

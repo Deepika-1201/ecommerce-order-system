@@ -1,6 +1,7 @@
 package com.ecommerce.support;
 
 import com.ecommerce.platform.ApiController;
+import com.ecommerce.platform.HttpAccessRules;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -10,8 +11,10 @@ import java.time.Duration;
 import java.util.Map;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestComponent;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalManagementPort;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -31,7 +34,7 @@ import tools.jackson.databind.json.JsonMapper;
     "spring.datasource.hikari.maximum-pool-size=10",
     "spring.datasource.hikari.minimum-idle=1"
 })
-@Import(IntegrationTest.RoleProbeController.class)
+@Import({IntegrationTest.RoleProbeController.class, IntegrationTest.RoleProbeAccess.class})
 public abstract class IntegrationTest {
 
     protected static final String API_PROBE = "/test/role-probe";
@@ -43,6 +46,8 @@ public abstract class IntegrationTest {
         registry.add("spring.datasource.url", EmbeddedPostgresSupport::jdbcUrl);
         registry.add("spring.datasource.username", () -> "postgres");
         registry.add("spring.datasource.password", () -> "postgres");
+        registry.add("ecom.security.issuer", () -> TestIdentityProvider.ISSUER);
+        registry.add("ecom.security.jwk-set-uri", TestIdentityProvider::jwkSetUri);
     }
 
     @LocalServerPort
@@ -62,6 +67,24 @@ public abstract class IntegrationTest {
         HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + targetPort + path))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(json));
+        if (headers.length > 0) {
+            request.headers(headers);
+        }
+        return send(request);
+    }
+
+    /** Calls the public API. {@code token} and {@code json} may be null; {@code headers} are name-value pairs. */
+    protected HttpResponse<String> call(String method, String path, String token, String json, String... headers) {
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+                .method(method, json == null
+                        ? HttpRequest.BodyPublishers.noBody()
+                        : HttpRequest.BodyPublishers.ofString(json));
+        if (json != null) {
+            request.header("Content-Type", "application/json");
+        }
+        if (token != null) {
+            request.header("Authorization", "Bearer " + token);
+        }
         if (headers.length > 0) {
             request.headers(headers);
         }
@@ -92,6 +115,15 @@ public abstract class IntegrationTest {
         @GetMapping(API_PROBE)
         Map<String, Object> probe() {
             return Map.of("served", true);
+        }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class RoleProbeAccess {
+
+        @Bean
+        HttpAccessRules roleProbeAccess() {
+            return rules -> rules.requestMatchers(API_PROBE).permitAll();
         }
     }
 }
