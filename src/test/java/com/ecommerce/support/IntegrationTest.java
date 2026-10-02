@@ -48,6 +48,14 @@ public abstract class IntegrationTest {
         registry.add("spring.datasource.password", () -> "postgres");
         registry.add("ecom.security.issuer", () -> TestIdentityProvider.ISSUER);
         registry.add("ecom.security.jwk-set-uri", TestIdentityProvider::jwkSetUri);
+        registry.add("ecom.media.endpoint", S3ProxySupport::endpoint);
+        registry.add("ecom.media.bucket", () -> S3ProxySupport.BUCKET);
+        registry.add("ecom.media.region", () -> S3ProxySupport.REGION);
+        registry.add("ecom.media.path-style", () -> "true");
+        registry.add("ecom.media.object-acl", () -> "public-read");
+        registry.add("ecom.media.access-key", () -> S3ProxySupport.ACCESS_KEY);
+        registry.add("ecom.media.secret-key", () -> S3ProxySupport.SECRET_KEY);
+        registry.add("ecom.media.public-base-url", S3ProxySupport::publicBaseUrl);
     }
 
     @LocalServerPort

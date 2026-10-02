@@ -2,3 +2,11 @@
 logging:
   level:
     com.ecommerce: DEBUG
+
+# The S3Proxy from compose (docker compose up -d s3proxy media-bucket). These keys exist only there.
+ecom:
+  media:
+    endpoint: http://localhost:9000
+    path-style: true
+    access-key: local-access-key
+    secret-key: local-secret-key

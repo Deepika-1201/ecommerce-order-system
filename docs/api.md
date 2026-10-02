@@ -38,6 +38,7 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 | `malformed_request` | 400 | The body is not valid JSON |
 | `invalid_request` | 400 | Another client error, such as a missing parameter |
 | `invalid_cursor` | 400 | The pagination cursor was not issued by this API |
+| `invalid_options`, `invalid_option_values` | 400 | A product's options, or a variant's option values, break the option rules |
 | `idempotency_key_required`, `invalid_idempotency_key` | 400 | `Idempotency-Key` is missing, or not 1–255 printable characters |
 | `unauthorized` | 401 | No token, or the token is invalid or expired |
 | `forbidden` | 403 | The token lacks the role |
@@ -47,10 +48,11 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 | `address_limit_reached` | 409 | A customer already has 10 addresses |
 | `category_slug_taken`, `category_cycle`, `category_too_deep` | 409 | Category rules |
 | `sku_taken`, `variant_exists`, `too_many_variants`, `options_locked` | 409 | Variant and option rules |
-| `product_needs_active_variant`, `invalid_status_transition` | 409 | Product status rules |
+| `product_needs_active_variant` | 409 | An active product needs an active variant |
 | `image_limit_reached`, `upload_not_found` | 409 | Image rules |
 | `precondition_failed` | 412 | `If-Match` does not match the current version |
 | `idempotency_key_reused`, `upload_mismatch` | 422 | The key was used for a different request; the uploaded object is not what was announced |
+| `unknown_category` | 422 | The category or parent category in the body does not exist |
 | `precondition_required` | 428 | `If-Match` is required |
 | `internal_error` | 500 | Unexpected; details are in the logs under the request id |
 
@@ -62,7 +64,7 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 
 ## 5. Caching and concurrency
 
-- **Public reads** carry `Cache-Control: public, max-age=30` and an `ETag`; `If-None-Match` gets `304 Not Modified`. Everything else is `Cache-Control: no-store`.
+- **Public reads** carry `Cache-Control: public, max-age=30` (a day for reference data such as `/v1/states`) and an `ETag`; `If-None-Match` gets `304 Not Modified`. Everything else is `Cache-Control: no-store`.
 - **Concurrent edits:** a product's `ETag` is its version. `PATCH` needs `If-Match`: a stale version gets `412`, and a missing header `428`.
 - **Retries:** `Idempotency-Key` is required where a retry must not repeat an effect: order placement, cancellations and staff money actions, from phase 6 ([ADR-010](decisions/ADR-010-idempotency.md)).
 
@@ -75,7 +77,7 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 | `GET /v1/states` | Anyone | 3 |
 | `GET`, `PATCH /v1/me` | `customer` | 3 |
 | `GET`, `POST /v1/me/addresses`; `GET`, `PUT`, `DELETE /v1/me/addresses/{id}`; `POST /v1/me/addresses/{id}/default` | `customer` | 3 |
-| `POST /v1/admin/catalog/categories`, `PATCH /v1/admin/catalog/categories/{id}` | `admin` | 3 |
+| `POST /v1/admin/catalog/categories`, `PATCH /v1/admin/catalog/categories/{id}`, `POST …/categories/{id}/move` | `admin` | 3 |
 | `GET`, `POST /v1/admin/catalog/products`; `GET`, `PATCH /v1/admin/catalog/products/{id}` | `admin` | 3 |
 | `POST /v1/admin/catalog/products/{id}/activate`, `/archive` | `admin` | 3 |
 | `POST /v1/admin/catalog/products/{id}/variants`, `PATCH …/variants/{variantId}` | `admin` | 3 |

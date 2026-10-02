@@ -44,6 +44,12 @@ ecom:
     issuer: ${ECOM_SECURITY_ISSUER:http://localhost:8180/realms/ecommerce}
     jwk-set-uri: ${ECOM_SECURITY_JWK_SET_URI:http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs}
     audience: ${ECOM_SECURITY_AUDIENCE:ecommerce-api}
+  # Without ECOM_MEDIA_ENDPOINT this is AWS S3 with the default credential chain (LLD §3.13).
+  media:
+    bucket: ${ECOM_MEDIA_BUCKET:ecommerce-media}
+    region: ${ECOM_MEDIA_REGION:ap-south-1}
+    public-base-url: ${ECOM_MEDIA_PUBLIC_BASE_URL:http://localhost:9000/ecommerce-media}
+    object-acl: ${ECOM_MEDIA_OBJECT_ACL:public-read}
 
 management:
   server:

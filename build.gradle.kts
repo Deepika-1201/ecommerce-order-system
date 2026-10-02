@@ -18,6 +18,8 @@ repositories {
 }
 
 val springModulithVersion = "2.1.1"
+val awsSdkVersion = "2.55.10"
+val s3proxyVersion = "4.1.1"
 val embeddedPostgresVersion = "2.2.2"
 val embeddedPostgresBinariesVersion = "17.11.0"
 val archunitVersion = "1.5.1"
@@ -25,10 +27,17 @@ val archunitVersion = "1.5.1"
 dependencyManagement {
     imports {
         mavenBom("org.springframework.modulith:spring-modulith-bom:$springModulithVersion")
+        mavenBom("software.amazon.awssdk:bom:$awsSdkVersion")
     }
 }
 
+// S3Proxy runs in its own JVM during tests (ADR-015), so its dependencies never meet the application's.
+val s3proxy: Configuration by configurations.creating
+
 dependencies {
+    s3proxy("org.gaul:s3proxy:$s3proxyVersion:jar-with-dependencies") {
+        isTransitive = false
+    }
     implementation("org.springframework.boot:spring-boot-starter-webmvc")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
@@ -36,6 +45,11 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-kafka")
     implementation("org.springframework.boot:spring-boot-starter-security-oauth2-resource-server")
+    implementation("software.amazon.awssdk:s3") {
+        exclude(group = "software.amazon.awssdk", module = "apache-client")
+        exclude(group = "software.amazon.awssdk", module = "netty-nio-client")
+    }
+    implementation("software.amazon.awssdk:url-connection-client")
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.springframework.modulith:spring-modulith-api")
     implementation("org.postgresql:postgresql")
@@ -68,6 +82,8 @@ tasks.withType<Test> {
     // Cached Spring contexts plus embedded Kafka outgrow Gradle's 512 MB default.
     maxHeapSize = "1g"
     systemProperty("user.timezone", "UTC")
+    inputs.files(s3proxy)
+    jvmArgumentProviders.add(CommandLineArgumentProvider { listOf("-Ds3proxy.jar=${s3proxy.singleFile.absolutePath}") })
     jvmArgs("-XX:+EnableDynamicAgentLoading")
     testLogging {
         events("failed")

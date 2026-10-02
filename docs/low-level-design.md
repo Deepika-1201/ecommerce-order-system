@@ -517,7 +517,8 @@ All under `/v1/admin/catalog`, role `admin`:
 
 | Endpoint | Effect |
 |---|---|
-| `POST /categories`, `PATCH /categories/{id}` | Create; rename, change the slug, or move |
+| `POST /categories`, `PATCH /categories/{id}` | Create; rename or change the slug |
+| `POST /categories/{id}/move` | Move under `parent_id`, or to the top with `null`. A separate endpoint because a move locks the tree and has its own errors, and because in a `PATCH` a `null` parent would be ambiguous with "unchanged" |
 | `GET /products` | List, including drafts and archived; filter by status, category and text |
 | `POST /products` | Create a draft |
 | `GET /products/{id}` | Read, with the `ETag` |
@@ -566,7 +567,7 @@ sequenceDiagram
 - **Limits:** JPEG, PNG or WebP; up to 5 MiB; up to 10 images per product.
 - **Upload URL:** valid for 5 minutes. It signs `Content-Type`, `Content-Length` and, locally, `x-amz-acl: public-read`, so storage refuses any other size or type (the ADR-015 spike).
 - **Key:** `products/{productId}/{imageId}.{ext}`.
-- **Completion** checks the stored object. A missing object gets `409 upload_not_found`, and a different size or type `422 upload_mismatch`.
+- **Completion** checks the stored object before locking the product, so no lock is held across a call to storage. A missing object gets `409 upload_not_found`, and a different size or type `422 upload_mismatch`; the image stays pending until it expires.
 - **Deletion** removes the row at once and schedules the object's deletion as the task `catalog.delete-image-object`, so the API never waits on storage.
 - **Abandoned uploads:** the hourly recurring task `catalog.expire-pending-images` removes uploads still pending after 24 hours, with their objects.
 - **Public URL:** `ecom.media.public-base-url` plus the key. That is S3Proxy locally and CloudFront in AWS (phase 17).
@@ -642,6 +643,7 @@ The CI container job runs the same script against the compose stack.
 | `ecom.security.audience` | `ecommerce-api` | Expected in `aud` |
 | `ecom.media.bucket`, `region` | `ecommerce-media`, `ap-south-1` | |
 | `ecom.media.endpoint`, `presign-endpoint` | Unset, meaning AWS | Compose: `http://s3proxy:80` and `http://localhost:9000` |
+| `ecom.media.path-style` | `false` | `true` with S3Proxy, which has no per-bucket host names |
 | `ecom.media.public-base-url` | `http://localhost:9000/ecommerce-media` | CloudFront in AWS |
 | `ecom.media.object-acl` | `public-read` | `none` in AWS |
 | `ecom.media.access-key`, `secret-key` | Unset | Compose and tests only; AWS uses the default credential chain |
