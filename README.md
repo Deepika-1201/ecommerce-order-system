@@ -10,7 +10,7 @@ It is one of four independent systems that integrate only through published cont
 | [distributed-job-scheduler](https://github.com/Deepika-1201/distributed-job-scheduler) | Runs this system's deadlines, retried calls and recurring jobs |
 | [ride-hailing-platform](https://github.com/Deepika-1201/ride-hailing-platform) | Separate system in the same ecosystem; no direct integration |
 
-> **Status:** Phase 1, scaffolding. The design (requirements, HLD, saga, consistency and failure analysis, ADR-001 to ADR-014) was approved on 2026-10-02.
+> **Status:** Phase 1 (scaffolding) is done; phase 2 (platform messaging: outbox, dispatcher, relay) is next. The design (requirements, HLD, saga, consistency and failure analysis, ADR-001 to ADR-014) was approved on 2026-10-02.
 
 ## Quick start
 
