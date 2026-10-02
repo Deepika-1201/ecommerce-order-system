@@ -66,7 +66,7 @@ flowchart TB
 | Distributed Job Scheduler (Go) | Coordination: queues, workers, retries, scheduling | Built (phases 1–4, 6–9, 11) | Deadlines, retried calls to other parties, recurring jobs ([ADR-003](decisions/ADR-003-job-scheduler-integration.md)) |
 | E-commerce (this project) | Business workflows: events, saga, inventory, consistency | Phase 1 | — |
 | Payment Gateway (Java/Spring Boot) | Financial correctness: idempotency, reconciliation, webhooks | Built (phases 1–9, 13, 14) | This system is a merchant: payments, hosted checkout, refunds, signed webhooks ([ADR-002](decisions/ADR-002-payment-gateway-integration.md)) |
-| Ride-hailing | Real time: geo, location, dispatch, concurrency | Not started | Nothing. Expected to become the gateway's second merchant and the scheduler's second tenant |
+| Ride-hailing | Real time: geo, location, dispatch, concurrency | Repository set up; design not started | Nothing. Expected to become the gateway's second merchant and the scheduler's second tenant |
 
 Ecosystem rules this system follows:
 
