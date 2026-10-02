@@ -30,6 +30,9 @@ import com.ecommerce.platform.ApiController;
 import com.ecommerce.platform.ApiException;
 import com.ecommerce.platform.Caller;
 import com.ecommerce.platform.ObjectStorage;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -52,10 +55,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 
 /** Catalog administration (LLD §3.6). Product responses carry the product's version as a strong {@code ETag}. */
 @ApiController
 @RequestMapping("/v1/admin/catalog")
+@Tag(name = "Catalog administration", description = "Role admin. Product responses carry the version as ETag.")
+@SecurityRequirement(name = ApiController.BEARER_AUTH)
 class CatalogAdminController {
 
     private static final Pattern STRONG_ETAG = Pattern.compile("\"(\\d{1,18})\"");
@@ -73,22 +79,27 @@ class CatalogAdminController {
         this.storage = storage;
     }
 
+    @Operation(summary = "Create a category, at most 4 levels deep")
     @PostMapping("/categories")
+    @ResponseStatus(HttpStatus.CREATED)
     ResponseEntity<CategoryResponse> createCategory(Caller admin, @Valid @RequestBody CreateCategory request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(CategoryResponse.of(
                 categories.create(admin, request.name(), request.slug(), request.parentId())));
     }
 
+    @Operation(summary = "Rename a category or change its slug")
     @PatchMapping("/categories/{id}")
     CategoryResponse updateCategory(Caller admin, @PathVariable UUID id, @Valid @RequestBody UpdateCategory request) {
         return CategoryResponse.of(categories.rename(admin, id, request.name(), request.slug()));
     }
 
+    @Operation(summary = "Move a category with its subtree; a null parent moves it to the top")
     @PostMapping("/categories/{id}/move")
     CategoryResponse moveCategory(Caller admin, @PathVariable UUID id, @RequestBody MoveCategory request) {
         return CategoryResponse.of(categories.move(admin, id, request.parentId()));
     }
 
+    @Operation(summary = "List products in any status, newest first, or by relevance with q")
     @GetMapping("/products")
     ProductList listProducts(
             @RequestParam(required = false) ProductStatus status,
@@ -102,18 +113,22 @@ class CatalogAdminController {
                 page.next().map(Cursors::encode).orElse(null));
     }
 
+    @Operation(summary = "Create a draft product")
     @PostMapping("/products")
+    @ResponseStatus(HttpStatus.CREATED)
     ResponseEntity<AdminProduct> createProduct(Caller admin, @Valid @RequestBody CreateProduct request) {
         Product product = products.create(admin, new NewProduct(request.title(), request.description(),
                 request.categoryId(), request.gstCategory(), OptionBody.toOptions(request.options())));
         return withEtag(ResponseEntity.created(URI.create("/v1/admin/catalog/products/" + product.id())), product);
     }
 
+    @Operation(summary = "Read a product in any status, with its version as ETag")
     @GetMapping("/products/{id}")
-    ResponseEntity<AdminProduct> product(@PathVariable UUID id) {
+    ResponseEntity<AdminProduct> getProduct(@PathVariable UUID id) {
         return withEtag(ResponseEntity.ok(), products.get(id));
     }
 
+    @Operation(summary = "Change a product; needs If-Match with its ETag")
     @PatchMapping("/products/{id}")
     ResponseEntity<AdminProduct> updateProduct(Caller admin, @PathVariable UUID id,
             @RequestHeader(name = HttpHeaders.IF_MATCH, required = false) String ifMatch,
@@ -124,17 +139,21 @@ class CatalogAdminController {
         return withEtag(ResponseEntity.ok(), product);
     }
 
+    @Operation(summary = "Make a product public; it needs an active variant")
     @PostMapping("/products/{id}/activate")
     ResponseEntity<AdminProduct> activate(Caller admin, @PathVariable UUID id) {
         return withEtag(ResponseEntity.ok(), products.activate(admin, id));
     }
 
+    @Operation(summary = "Hide a product; products are never deleted")
     @PostMapping("/products/{id}/archive")
     ResponseEntity<AdminProduct> archive(Caller admin, @PathVariable UUID id) {
         return withEtag(ResponseEntity.ok(), products.archive(admin, id));
     }
 
+    @Operation(summary = "Add a variant naming one value of every option")
     @PostMapping("/products/{id}/variants")
+    @ResponseStatus(HttpStatus.CREATED)
     ResponseEntity<AdminProduct> addVariant(Caller admin, @PathVariable UUID id,
             @Valid @RequestBody CreateVariant request) {
         Product product = products.addVariant(admin, id, new NewVariant(request.sku(), request.optionValues(),
@@ -142,6 +161,7 @@ class CatalogAdminController {
         return withEtag(ResponseEntity.status(HttpStatus.CREATED), product);
     }
 
+    @Operation(summary = "Change a variant's price or status")
     @PatchMapping("/products/{id}/variants/{variantId}")
     ResponseEntity<AdminProduct> updateVariant(Caller admin, @PathVariable UUID id, @PathVariable UUID variantId,
             @Valid @RequestBody UpdateVariant request) {
@@ -150,7 +170,9 @@ class CatalogAdminController {
         return withEtag(ResponseEntity.ok(), product);
     }
 
+    @Operation(summary = "Start an image upload: returns a pre-signed URL valid for 5 minutes")
     @PostMapping("/products/{id}/images")
+    @ResponseStatus(HttpStatus.CREATED)
     ResponseEntity<ImageUpload> requestImageUpload(Caller admin, @PathVariable UUID id,
             @Valid @RequestBody RequestUpload request) {
         ImageService.Upload upload = images.requestUpload(admin, id, request.contentType(), request.sizeBytes(),
@@ -159,12 +181,15 @@ class CatalogAdminController {
                 UploadInstructions.of(upload.upload())));
     }
 
+    @Operation(summary = "Confirm an upload once storage holds exactly the announced object")
     @PostMapping("/products/{id}/images/{imageId}/complete")
     AdminImage completeImageUpload(Caller admin, @PathVariable UUID id, @PathVariable UUID imageId) {
         return AdminImage.of(images.complete(admin, id, imageId), storage);
     }
 
+    @Operation(summary = "Remove an image; its object is deleted afterwards")
     @DeleteMapping("/products/{id}/images/{imageId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
     ResponseEntity<Void> deleteImage(Caller admin, @PathVariable UUID id, @PathVariable UUID imageId) {
         images.delete(admin, id, imageId);
         return ResponseEntity.noContent().build();

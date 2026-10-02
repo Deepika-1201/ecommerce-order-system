@@ -19,6 +19,7 @@ repositories {
 
 val springModulithVersion = "2.1.1"
 val awsSdkVersion = "2.55.10"
+val springdocVersion = "3.1.1"
 val s3proxyVersion = "4.1.1"
 val embeddedPostgresVersion = "2.2.2"
 val embeddedPostgresBinariesVersion = "17.11.0"
@@ -50,6 +51,7 @@ dependencies {
         exclude(group = "software.amazon.awssdk", module = "netty-nio-client")
     }
     implementation("software.amazon.awssdk:url-connection-client")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-api:$springdocVersion")
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.springframework.modulith:spring-modulith-api")
     implementation("org.postgresql:postgresql")
@@ -93,4 +95,17 @@ tasks.withType<Test> {
 
 tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootTestRun") {
     mainClass = "com.ecommerce.LocalDevApplication"
+}
+
+// ADR-016: rewrites docs/api/openapi.json from the code; the build's own test fails while the file is stale.
+tasks.register<Test>("updateOpenApi") {
+    description = "Regenerates docs/api/openapi.json from the controllers."
+    group = "documentation"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    filter {
+        includeTestsMatching("com.ecommerce.platform.web.OpenApiDocumentTests.theCommittedDocumentMatchesTheCode")
+    }
+    systemProperty("openapi.update", "true")
+    outputs.upToDateWhen { false }
 }

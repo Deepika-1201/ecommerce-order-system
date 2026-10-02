@@ -611,6 +611,8 @@ Per [ADR-016](decisions/ADR-016-openapi-from-code.md):
 - springdoc-openapi 3.1 generates the document from the controllers, and serves it on the management port at `/actuator/openapi`.
 - It declares a bearer-token security scheme, and protected operations name it.
 - `docs/api/openapi.json` is committed. `OpenApiDocumentTests` fails if the file is stale, and `./gradlew updateOpenApi` rewrites it.
+- **Stable output:** only `/v1/**` paths (no test fixtures); a fixed server URL instead of the request's; keys sorted; operation ids are the handler method names, which a test keeps unique, because springdoc would otherwise number clashes in scan order.
+- **Accurate schemas:** swagger-core reads models with its own Jackson 2 mapper, so a `ModelResolver` bean applies the API's `snake_case`. The `Caller` argument is hidden, and `@ResponseStatus` documents `201` and `204` where a `ResponseEntity` sets them.
 
 ### 3.12 Local environment and demo
 

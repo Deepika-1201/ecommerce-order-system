@@ -57,7 +57,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,openapi
   endpoint:
     health:
       probes:
@@ -69,3 +69,11 @@ management:
 logging:
   pattern:
     level: "%5p [%X{request_id:-}]"
+
+# The OpenAPI document, on the management port only (ADR-016); the committed copy is docs/api/openapi.json.
+springdoc:
+  use-management-port: true
+  paths-to-match: /v1/**
+  default-produces-media-type: application/json
+  writer-with-order-by-keys: true
+  writer-with-default-pretty-printer: true

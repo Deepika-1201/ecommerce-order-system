@@ -13,6 +13,8 @@ import com.ecommerce.catalog.web.CatalogApi.ProductListItem;
 import com.ecommerce.catalog.web.CatalogApi.PublicProduct;
 import com.ecommerce.platform.ApiController;
 import com.ecommerce.platform.ObjectStorage;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.Size;
@@ -31,6 +33,7 @@ import org.springframework.web.bind.annotation.RequestParam;
  * from the body, so a revalidation that finds no change gets {@code 304}.
  */
 @ApiController
+@Tag(name = "Catalog", description = "No token needed. Cacheable for 30 s, with ETags.")
 class PublicCatalogController {
 
     static final CacheControl CACHE = CacheControl.maxAge(Duration.ofSeconds(30)).cachePublic();
@@ -45,14 +48,16 @@ class PublicCatalogController {
         this.storage = storage;
     }
 
+    @Operation(summary = "The category tree, sorted by name")
     @GetMapping("/v1/categories")
-    ResponseEntity<CategoryTreeResponse> categories() {
+    ResponseEntity<CategoryTreeResponse> categoryTree() {
         CategoryTree tree = categories.tree();
         return ResponseEntity.ok().cacheControl(CACHE).body(new CategoryTreeResponse(nodes(tree, null)));
     }
 
+    @Operation(summary = "Browse active products, newest first, or search them by relevance with q")
     @GetMapping("/v1/products")
-    ResponseEntity<ProductList> products(
+    ResponseEntity<ProductList> browseProducts(
             @RequestParam(required = false) String category,
             @RequestParam(required = false) @Size(max = 100) String q,
             @RequestParam(defaultValue = "20") @Min(1) @Max(50) int limit,
@@ -64,8 +69,9 @@ class PublicCatalogController {
                 page.next().map(Cursors::encode).orElse(null)));
     }
 
+    @Operation(summary = "An active product with its active variants and images")
     @GetMapping("/v1/products/{id}")
-    ResponseEntity<PublicProduct> product(@PathVariable UUID id) {
+    ResponseEntity<PublicProduct> viewProduct(@PathVariable UUID id) {
         return ResponseEntity.ok().cacheControl(CACHE).body(PublicProduct.of(products.getActive(id), storage));
     }
 

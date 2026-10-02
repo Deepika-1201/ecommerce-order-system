@@ -14,4 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @ConditionalOnRole(Role.API)
 public @interface ApiController {
+
+    /** The OpenAPI security scheme that controllers needing a token name in {@code @SecurityRequirement}. */
+    String BEARER_AUTH = "bearer";
 }
