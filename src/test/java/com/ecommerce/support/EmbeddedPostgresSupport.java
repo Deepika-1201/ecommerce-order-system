@@ -15,7 +15,8 @@ public final class EmbeddedPostgresSupport {
     public static synchronized String jdbcUrl() {
         if (postgres == null) {
             try {
-                postgres = EmbeddedPostgres.builder().start();
+                // Each cached test context has its own pool, so allow more than the default 100 connections.
+                postgres = EmbeddedPostgres.builder().setServerConfig("max_connections", "300").start();
             } catch (IOException e) {
                 throw new UncheckedIOException("Could not start embedded PostgreSQL", e);
             }

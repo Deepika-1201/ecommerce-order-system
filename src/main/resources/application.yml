@@ -15,6 +15,17 @@ spring:
   jackson:
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
+  # The outbox relay is the only producer (LLD §2.5). Kafka is not a readiness dependency: the outbox buffers.
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all
+      properties:
+        enable.idempotence: true
+        linger.ms: 5
+        max.block.ms: 5000
+        request.timeout.ms: 10000
+        delivery.timeout.ms: 30000
 
 server:
   port: ${PORT:8080}

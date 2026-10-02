@@ -34,12 +34,14 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("org.springframework.boot:spring-boot-starter-kafka")
     implementation("org.flywaydb:flyway-database-postgresql")
     implementation("org.springframework.modulith:spring-modulith-api")
-    runtimeOnly("org.postgresql:postgresql")
+    implementation("org.postgresql:postgresql")
     annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
 
     testImplementation("org.springframework.boot:spring-boot-starter-webmvc-test")
+    testImplementation("org.springframework.boot:spring-boot-starter-kafka-test")
     testImplementation("org.springframework.modulith:spring-modulith-starter-test")
     testImplementation(platform("io.zonky.test.postgres:embedded-postgres-binaries-bom:$embeddedPostgresBinariesVersion"))
     testImplementation("io.zonky.test:embedded-postgres:$embeddedPostgresVersion")
@@ -62,6 +64,8 @@ tasks.named<Jar>("jar") {
 
 tasks.withType<Test> {
     useJUnitPlatform()
+    // Cached Spring contexts plus embedded Kafka outgrow Gradle's 512 MB default.
+    maxHeapSize = "1g"
     systemProperty("user.timezone", "UTC")
     jvmArgs("-XX:+EnableDynamicAgentLoading")
     testLogging {

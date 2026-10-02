@@ -236,11 +236,15 @@ Each relay transaction:
 
 Any failure rolls back the batch and backs it off. A crash after the acknowledgements but before commit sends the batch again: delivery is at-least-once, and consumers deduplicate on `message_id`.
 
-The producer uses `acks=all` with idempotence enabled. Kafka is not a readiness dependency: while it is down, the outbox buffers (NFR-8).
+**Relay failures never park a row.** They come from the broker, not the message, so rows wait out an outage of any length with backoff capped at 5 minutes.
+
+The producer uses `acks=all` with idempotence enabled, and `max.block.ms` is 5 s so an unreachable broker cannot stall the relay for a minute. Kafka is not a readiness dependency: while it is down, the outbox buffers (NFR-8).
 
 ### 2.6 Waking up
 
 Each worker instance holds one connection that listens on `ecom_outbox` and `ecom_tasks`, and wakes the matching loops on each notification. Polling every 500 ms is the backstop. A broken listener reconnects with backoff, and polling covers the gap.
+
+**An instance claims only work it can do:** the dispatcher claims rows for its own handlers' destinations, and the task runner claims only types it has handlers for. During a rolling deployment, an old instance therefore never takes, and parks, messages or tasks for a handler that only the new version has.
 
 ### 2.7 Tasks
 
@@ -264,7 +268,7 @@ In-process adapter, table `platform.scheduled_tasks`:
 | Run | The handler runs outside any transaction, with the task id as its idempotency key |
 | Complete | Only if still `RUNNING` with the same attempt number (fencing); a stale worker's completion is ignored |
 | Fail | Retry with exponential backoff (10 s doubling to 1 h); `DEAD` after the task's maximum attempts (default 10) |
-| Recurring | One active row per type, rescheduled at a fixed rate; missed runs collapse into one; a failed run waits for the next interval |
+| Recurring | One row per type, registered at startup. The next run is the first slot of the schedule after now, so runs missed while the system was down collapse into one. A failed run waits for the next interval. The attempt counter keeps growing across runs, so fencing also works between runs |
 
 Phase 10 replaces the adapter (submission through the outbox, the gRPC worker) and keeps this API.
 
@@ -284,7 +288,7 @@ The key and the action share **one transaction**, so the action's effects and th
    - **Inserted:** run the action, store its status, body and `Location`, and commit.
    - **The key exists with a different fingerprint:** `422 idempotency_key_reused`.
    - **The key exists with the same fingerprint:** replay the stored response with `Idempotent-Replayed: true`.
-   - **The lock timeout fired** (another request with this key is still running): `409 idempotency_request_in_progress` with `Retry-After: 1`.
+   - **The lock timeout fired** (another request with this key is still running): `409 idempotency_request_in_progress` with `Retry-After: 1`. Spring does not translate PostgreSQL's `lock_not_available` (`55P03`), so the code checks the SQL state.
 
 - **Fingerprint:** SHA-256 of the operation and the canonical JSON of the parsed body, so reformatting the JSON does not change it.
 - **Releasing the key:** if the action throws, the rollback removes the key, so the client can retry.
@@ -313,7 +317,9 @@ The key and the action share **one transaction**, so the action's effects and th
 | `ecom.messaging.max-attempts` | 10 |
 | `ecom.messaging.initial-backoff`, `max-backoff` | 1 s, 5 min |
 | `ecom.messaging.relay-batch-size`, `relay-send-timeout` | 100, 10 s |
-| `ecom.tasks.concurrency`, `default-lease` | 4, 5 min |
+| `ecom.tasks.concurrency`, `poll-interval`, `default-lease` | 4, 500 ms, 5 min |
+| `ecom.tasks.initial-backoff`, `max-backoff` | 10 s, 1 h |
+| `ecom.idempotency.key-ttl`, `lock-timeout` | 24 h, 200 ms |
 | `ecom.cleanup.delivered-messages`, `processed-messages`, `finished-tasks` | 7 days, 30 days, 30 days |
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` |
 
@@ -328,19 +334,20 @@ The recurring task `platform.cleanup` runs every hour. In batches of 1,000 rows,
 
 ### 2.13 Tests
 
-Each crash between steps is simulated by rolling back at that step, then running the next attempt.
+Each crash between steps is simulated by failing at that step (a handler that throws after its write, a trigger that rejects marking a row delivered, a lease left to expire), then running the next attempt.
 
 | Test | Proves |
 |---|---|
-| `MessagesTests` | Rollback leaves no message; commit fans out to every route; an unroutable type fails |
-| `DispatcherTests` | Failure rolls back the handler's effect and retries it, so the effect happens exactly once. A delivered message is never redelivered. An existing processed-message record skips the handler. Per-aggregate order holds while other aggregates continue. Parking and re-drive work. Four concurrent workers deliver 200 messages exactly once, in order per aggregate |
-| `BackgroundDeliveryTests` | With polling set to an hour, NOTIFY alone delivers a message within seconds |
-| `KafkaRelayTests` | Key, value and headers on embedded Kafka. A crash between the send and the commit resends, with the same `message_id`. At most one row per aggregate in a batch |
-| `KafkaUnavailableTests` | With an unreachable broker, rows stay pending and back off |
-| `TaskSchedulerTests` | Rollback leaves no task. Retries, then `DEAD`. Deduplication. A crashed worker's lease is reclaimed. Fencing ignores a stale completion. Recurring rescheduling. Two runners execute a task once |
-| `IdempotentRequestsTests` | Replay, `422`, `409` with `Retry-After`, release on failure, expiry |
-| `AuditLogTests` | Records in the caller's transaction; `UPDATE` and `DELETE` are rejected |
-| `IdsTests` | Version 7, variant, time order |
+| `MessagesTests` | Publishing needs a transaction. Rollback leaves no message. Commit fans out to every route. The envelope has the event-model fields. An unroutable type fails |
+| `DispatcherTests` | A failure after the handler's write rolls it back, and the retry applies it exactly once. A delivered message is not delivered again. An existing processed-message record skips the handler. Messages committed out of order arrive in sequence order. A failing message holds back only its own aggregate. Parking and re-drive work. An unreadable message parks at once. Four concurrent workers deliver 400 deliveries exactly once, in order per aggregate |
+| `BackgroundDeliveryTests`, `BackgroundTaskRunTests` | With polling set to an hour, the notification alone delivers a message, or runs a task, within seconds |
+| `KafkaRelayTests` | Key, value and headers on embedded Kafka. A crash between the send and the commit sends again, with the same `message_id`. At most one row per aggregate in a batch |
+| `KafkaUnavailableTests` | With an unreachable broker, rows stay pending, back off, and are never parked |
+| `TaskSchedulerTests` | Scheduling needs a transaction. Rollback leaves no task. Retries, then `DEAD`. An unreadable payload is `DEAD` at once. Deduplication. A future task waits. A dead worker's lease is taken over, and fencing rejects its late result. Four runners execute each task once. Recurring tasks: fixed rate, missed runs collapse, a failed run waits, registration is idempotent |
+| `PlatformCleanupTests` | Only finished records past their retention are deleted, in batches |
+| `IdempotentRequestsTests` | Replay with the same response, `422` for a different body, keys scoped per caller, `400` for missing or malformed keys, release on failure, `409` with `Retry-After`, expiry |
+| `AuditLogTests` | Records in the caller's transaction with the request and correlation ids; `UPDATE` and `DELETE` are rejected |
+| `IdsTests` | Version 7, variant, time order, uniqueness |
 
 ### 2.14 Exit criteria
 

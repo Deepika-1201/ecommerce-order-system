@@ -5,10 +5,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ecommerce.support.IntegrationTest;
 import java.net.http.HttpResponse;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 import org.springframework.test.context.TestPropertySource;
 
 @TestPropertySource(properties = "ecom.roles=worker")
 class WorkerRoleTests extends IntegrationTest {
+
+    @Autowired
+    private ApplicationContext context;
 
     @Test
     void infoReportsOnlyTheWorkerRole() {
@@ -28,5 +33,12 @@ class WorkerRoleTests extends IntegrationTest {
     @Test
     void isReadyForTraffic() {
         assertThat(get(managementPort, "/actuator/health/readiness").statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void runsTheWorkerLoops() {
+        assertThat(context.getBeansWithAnnotation(WorkerComponent.class).values())
+                .extracting(bean -> bean.getClass().getSimpleName())
+                .contains("Dispatcher", "KafkaRelay", "TaskRunner", "NotificationListener");
     }
 }

@@ -16,12 +16,14 @@ import com.ecommerce.platform.ApiException;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
+import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.TestComponent;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -106,6 +108,14 @@ class ProblemDetailsTests {
     }
 
     @Test
+    void retryableErrorTellsTheClientWhenToRetry() throws Exception {
+        mvc.perform(get("/test/problems/busy"))
+                .andExpect(status().isConflict())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, "2"))
+                .andExpect(jsonPath("$.code").value("still_busy"));
+    }
+
+    @Test
     void unexpectedErrorHidesItsMessage() throws Exception {
         MvcResult result = mvc.perform(get("/test/problems/boom"))
                 .andExpect(status().isInternalServerError())
@@ -134,6 +144,11 @@ class ProblemDetailsTests {
         Map<String, Object> conflict() {
             throw new ApiException(HttpStatus.CONFLICT, "order_invalid_state",
                     "The order cannot be cancelled after handover.");
+        }
+
+        @GetMapping("/test/problems/busy")
+        Map<String, Object> busy() {
+            throw new ApiException(HttpStatus.CONFLICT, "still_busy", "Try again shortly.", Duration.ofMillis(1500));
         }
 
         @GetMapping("/test/problems/boom")

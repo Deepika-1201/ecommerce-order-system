@@ -32,7 +32,11 @@ final class ProblemDetailsHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(ApiException.class)
     ResponseEntity<Object> handleApiException(ApiException exception, WebRequest request) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(exception.status(), exception.getMessage());
-        return handleExceptionInternal(exception, problem, new HttpHeaders(), exception.status(), request);
+        HttpHeaders headers = new HttpHeaders();
+        // Whole seconds, rounded up: a client that comes back early would only be refused again.
+        exception.retryAfter().ifPresent(delay -> headers.set(HttpHeaders.RETRY_AFTER,
+                Long.toString(Math.max(1, (delay.toMillis() + 999) / 1000))));
+        return handleExceptionInternal(exception, problem, headers, exception.status(), request);
     }
 
     @ExceptionHandler(Exception.class)
