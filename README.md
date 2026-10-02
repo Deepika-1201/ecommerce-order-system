@@ -37,4 +37,6 @@ docker compose up --build   # or: PostgreSQL 17 and the app in containers, with 
 | [docs/event-model.md](docs/event-model.md) | Commands, replies and events; envelope; topics; ordering; deduplication |
 | [docs/implementation-plan.md](docs/implementation-plan.md) | Phases and exit criteria |
 | [docs/low-level-design.md](docs/low-level-design.md) | Low-level design, one section per phase, written before its code |
+| [docs/api.md](docs/api.md) | API conventions, error codes and endpoints |
+| [docs/database.md](docs/database.md) | Schemas and tables, per module |
 | [docs/decisions/](docs/decisions/README.md) | Architecture decision records |

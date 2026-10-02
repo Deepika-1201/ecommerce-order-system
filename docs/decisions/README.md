@@ -16,5 +16,8 @@ Format: Context → Problem → Options considered → Decision → Trade-offs �
 | [ADR-010](ADR-010-idempotency.md) | Layered idempotency: API keys, domain uniqueness, message deduplication, outbound keys, guarded transitions | Accepted |
 | [ADR-011](ADR-011-event-versioning.md) | JSON Schema contracts in the repository, versioned event types; registry deferred | Accepted |
 | [ADR-012](ADR-012-no-cache-v1.md) | No cache tier in V1 | Accepted |
-| [ADR-013](ADR-013-technology-stack.md) | Java 25, Spring Boot 4.1, Spring Modulith, Spring for Apache Kafka, grpc-java, Keycloak, OpenTelemetry | Accepted |
+| [ADR-013](ADR-013-technology-stack.md) | Java 25, Spring Boot 4.1, Spring Modulith, Spring for Apache Kafka, grpc-java, Keycloak, OpenTelemetry | Accepted, amended |
 | [ADR-014](ADR-014-deployment.md) | AWS ap-south-1 on EKS, provisioned with Terraform; environments on demand | Accepted |
+| [ADR-015](ADR-015-s3proxy-local-object-storage.md) | S3Proxy for local and test object storage, instead of the archived MinIO community edition | Accepted |
+| [ADR-016](ADR-016-openapi-from-code.md) | The OpenAPI document is generated from code, committed and checked in CI | Accepted |
+| [ADR-017](ADR-017-customer-resources-under-me.md) | Customer-owned resources are reached only through `/v1/me` | Accepted |

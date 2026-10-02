@@ -42,3 +42,7 @@ Exact versions are pinned at scaffolding from Spring Initializr's metadata and t
 
 - Phase 1 scaffolds this stack, with a module-boundary test that fails on a forbidden dependency from day one.
 - The scheduler's proto is vendored with its source commit recorded. A protocol change shows up as a failing integration test, not a runtime surprise.
+
+## Amendment (2026-10-02, phase 3)
+
+MinIO's community edition was archived in April 2026 and is distributed as source only. Local and test object storage is S3Proxy instead ([ADR-015](ADR-015-s3proxy-local-object-storage.md)), and the local environment is PostgreSQL 17, Kafka (KRaft), Keycloak, Mailpit, S3Proxy and Grafana LGTM.

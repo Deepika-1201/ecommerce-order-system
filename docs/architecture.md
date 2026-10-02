@@ -415,7 +415,7 @@ The details come in `security.md` (phase 13).
 - Kafka (single-node KRaft);
 - Keycloak;
 - Mailpit;
-- MinIO;
+- S3Proxy, standing in for S3 ([ADR-015](decisions/ADR-015-s3proxy-local-object-storage.md));
 - Grafana LGTM.
 
 The `ecosystem` profile adds the real Payment Gateway and Job Scheduler, built from their repositories, each with its own database and host ports.

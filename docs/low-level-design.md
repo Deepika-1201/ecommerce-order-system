@@ -355,3 +355,315 @@ Each crash between steps is simulated by failing at that step (a handler that th
 |---|---|
 | No lost effects across crashes between steps | `MessagesTests`, `DispatcherTests`, `KafkaRelayTests`, `TaskSchedulerTests` |
 | No duplicated effects | `DispatcherTests` (processed messages, concurrency), `IdempotentRequestsTests`, task fencing |
+
+## 3. Catalog, customers and identity (phase 3)
+
+### 3.1 Scope
+
+Phase 3 delivers:
+
+- **Identity and access:** the service as an OIDC resource server, roles, object-level authorization ([ADR-017](decisions/ADR-017-customer-resources-under-me.md)), and problem+json for `401` and `403`.
+- **Customers:** profiles created on first use, and up to 10 addresses with PIN code and state.
+- **Catalog:** categories, products with options and variants (SKUs), list prices, GST categories, statuses, public browsing and search, and admin APIs with an audit trail.
+- **Product images,** uploaded to object storage through pre-signed URLs ([ADR-015](decisions/ADR-015-s3proxy-local-object-storage.md)).
+- **Documents:** [api.md](api.md) and the generated OpenAPI document ([ADR-016](decisions/ADR-016-openapi-from-code.md)); [database.md](database.md), which phase 2 should have started.
+- **Local environment:** Keycloak and S3Proxy in `docker compose`, and a demo script that the CI container job also runs.
+
+Not yet:
+
+- availability hints (phase 9);
+- carts and quotes (phase 4);
+- guest order links (phase 6);
+- staff access to customer records (with the support tools in phase 6);
+- account deletion and anonymization (phase 13).
+
+### 3.2 Identity and access
+
+**Tokens.** Keycloak issues them, and the service validates every one:
+
+| Check | Rule |
+|---|---|
+| Signature | RS256, with keys from the realm's JWK set, cached; an unknown key id triggers one refresh |
+| Issuer | `iss` equals `ecom.security.issuer` |
+| Audience | `aud` contains `ecommerce-api` |
+| Time | `exp` and `nbf`, with 60 s of clock skew |
+
+- **One issuer everywhere.** Keycloak's public URL is `http://localhost:8180`, so tokens carry the same issuer whether they were obtained from the host or inside the compose network. The app fetches keys from `http://keycloak:8080` inside the network.
+- **Key fetching** has a 1 s connect and 2 s read timeout. If Keycloak is unreachable, cached keys keep working (architecture §15).
+
+**Roles.** Keycloak realm roles (`realm_access.roles`) become authorities: `customer`, `support`, `warehouse`, `admin`. Unknown roles are ignored, and staff roles do not include `customer`.
+
+**Endpoint rules.** Each module declares the rules for its own paths through `HttpAccessRules` beans (platform API). A path no rule names is denied, so a new endpoint without a rule fails its tests instead of shipping open.
+
+| Paths | Access |
+|---|---|
+| `GET /v1/categories`, `GET /v1/products/**`, `GET /v1/states` | Anyone; no token needed |
+| `/v1/me/**` | Role `customer` |
+| `/v1/admin/catalog/**` | Role `admin` |
+| Management port: health, info, OpenAPI | Open; the port is not exposed publicly |
+| Anything else | Denied |
+
+**Errors** are problem+json, like every other error (§1.5):
+
+- `401 unauthorized`, with `WWW-Authenticate: Bearer`, for a missing, invalid or expired token;
+- `403 forbidden` for a valid token without the role.
+
+Neither says which check failed.
+
+**Object-level authorization** ([ADR-017](decisions/ADR-017-customer-resources-under-me.md)):
+
+- customer resources live under `/v1/me`, and the customer comes from the token's subject;
+- every lookup is scoped to that customer;
+- another customer's resource answers `404`.
+
+**Caller.** Controllers receive a `Caller` (subject, roles, email, name) instead of Spring Security types. Staff actions write the subject to the audit log.
+
+**Stateless.** No sessions and no cookies, so no CSRF tokens. No CORS either, since there is no browser client yet.
+
+**Local realm** (`deploy/keycloak/ecommerce-realm.json`, imported at startup):
+
+- **Clients:**
+  - `ecommerce-api` is the audience and has no login flows;
+  - `ecommerce-cli` is public, allows the password grant for the demo script only, and adds `ecommerce-api` to the audience.
+- **Users:** new users get the `customer` role. The demo users are two customers (`asha`, `ravi`) and an admin (`admin`), with local-only passwords.
+- **Password grant:** deprecated in OAuth 2.1, so it is enabled only in this local realm, for scripts. Real clients use the authorization code flow with PKCE.
+
+**Tests** need neither Keycloak nor Docker:
+
+- A test identity provider serves a JWK set from a local HTTP server and signs tokens with the matching private key. Tests therefore run the same decoder and validators as production; Boot checks the issuer only for JWK-set and issuer-URI decoders, not for a fixed public key.
+- A second key, never published, signs the forged tokens the tests need.
+
+### 3.3 API conventions
+
+Summarized here; [api.md](api.md) is the reference.
+
+- **Shape:** paths under `/v1`; JSON with `snake_case` fields, nulls omitted.
+- **Values:** ids are UUIDv7; money is integer paise with `currency: "INR"`.
+- **Lists** use cursor pagination: `limit` (1–50, default 20) and an opaque `cursor`. Responses carry `items` and `next_cursor`, which is absent on the last page.
+- **Errors** are problem+json with a stable `code`.
+- **Caching:** public catalog responses carry `Cache-Control: public, max-age=30` and an `ETag`, and `If-None-Match` gets `304`. Everything else is `no-store`.
+- **Concurrent edits:** changing a product needs `If-Match` with its `ETag`, which is the aggregate's version. A stale version gets `412 precondition_failed`, and a missing header `428 precondition_required`.
+
+### 3.4 Customers
+
+**Profile.** The first call to any `/v1/me` endpoint creates the customer, keyed by the token's subject.
+
+- **One profile per subject:** creation is `INSERT … ON CONFLICT DO NOTHING`, so concurrent first calls create one row. The customer id is a separate UUIDv7, which other modules use.
+- **Email and name** come from the token at creation. Email keeps following the token, because Keycloak owns it.
+- **Name and phone** can be changed by the customer. Phones are Indian mobile numbers, stored as `+91` and 10 digits.
+
+**Addresses.**
+
+| Rule | How it holds |
+|---|---|
+| At most 10 per customer | Adding one locks the customer row, then counts |
+| Exactly one default whenever there is an address | The first address becomes the default. Making another the default clears the old one in the same transaction. Deleting the default promotes the most recent remaining address. A partial unique index backs the rule |
+| Valid PIN code | Six digits, not starting with 0 |
+| Valid state | One of the 36 states and union territories, by GST state code (two digits; `29` is Karnataka). `GET /v1/states` lists them |
+| Contact | Recipient name and mobile number required |
+
+- **Why GST codes, not ISO 3166-2:** GST place of supply (phase 4) is what the state is for, and ISO changed several Indian codes in 2023. The list lives in `shared` (`IndianState`), for Pricing and Fulfillment too.
+- **PIN code and state are not cross-checked.** Carrier serviceability (phase 8) is the real check.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /v1/me`, `PATCH /v1/me` | Read the profile; change name or phone |
+| `GET /v1/me/addresses`, `POST /v1/me/addresses` | List, default first; add one |
+| `GET`, `PUT`, `DELETE /v1/me/addresses/{id}` | Read, replace or delete one |
+| `POST /v1/me/addresses/{id}/default` | Make it the default |
+| `GET /v1/states` | States and union territories with their GST codes |
+
+### 3.5 Catalog model
+
+```mermaid
+erDiagram
+    CATEGORY ||--o{ CATEGORY : "parent of"
+    CATEGORY ||--o{ PRODUCT : contains
+    PRODUCT ||--|{ VARIANT : "sold as"
+    PRODUCT ||--o{ PRODUCT_IMAGE : shows
+```
+
+- **Category:** name, slug (unique) and parent; at most 4 levels.
+- **Product** (aggregate root, with its variants and images): title, description, category, GST category, option dimensions, status and version.
+- **Options:** up to 3 dimensions (such as `size` and `color`), each with up to 30 values. Dimensions are fixed once the product has variants; values can be added at any time.
+- **Variant (SKU):** a unique SKU code, one value per dimension, a list price in paise, and status `ACTIVE` or `INACTIVE`. A product without dimensions has exactly one variant; no product has more than 100.
+- **GST category:** `STANDARD`, `REDUCED`, `EXEMPT`, `APPAREL`, `FOOTWEAR` or `DEMERIT`. Catalog only classifies; Pricing maps each category to its rate rule in phase 4, including the price-dependent rules for apparel and footwear.
+
+| Invariant | Enforced by |
+|---|---|
+| SKU codes are unique | Unique index; codes are upper-cased first |
+| One variant per combination of option values | Unique index on the product and a canonical combination key |
+| A variant names exactly the product's dimensions, with allowed values | Domain validation |
+| An active product has at least one active variant | Checked on activation and when a variant is deactivated (`409 product_needs_active_variant`) |
+| Prices are positive, up to ₹1 crore | Check constraint and validation |
+| The category tree has no cycles | Checked on every move, under a lock on the category table |
+
+**Statuses.** `DRAFT → ACTIVE ⇄ ARCHIVED`, and `DRAFT → ARCHIVED`. Only `ACTIVE` products are public. Products are never deleted, only archived, because inventory and carts refer to their SKUs.
+
+**Concurrency.** Every admin change to a product runs in one transaction that:
+
+1. locks the product row;
+2. checks the invariants;
+3. applies the change;
+4. increments `version`, which is the admin `ETag`.
+
+**Audit.** Every admin change writes an audit entry with the admin's subject, the action (such as `catalog.product.activated`) and the changed fields.
+
+Catalog publishes no events in V1 (domain model §3).
+
+### 3.6 Catalog admin API
+
+All under `/v1/admin/catalog`, role `admin`:
+
+| Endpoint | Effect |
+|---|---|
+| `POST /categories`, `PATCH /categories/{id}` | Create; rename, change the slug, or move |
+| `GET /products` | List, including drafts and archived; filter by status, category and text |
+| `POST /products` | Create a draft |
+| `GET /products/{id}` | Read, with the `ETag` |
+| `PATCH /products/{id}` | Change title, description, category, GST category or options; needs `If-Match` |
+| `POST /products/{id}/activate`, `POST /products/{id}/archive` | Change the status |
+| `POST /products/{id}/variants`, `PATCH /products/{id}/variants/{variantId}` | Add a variant; change its price or status |
+| `POST /products/{id}/images` | Start an image upload (§3.8) |
+| `POST /products/{id}/images/{imageId}/complete` | Confirm the upload |
+| `DELETE /products/{id}/images/{imageId}` | Remove an image |
+
+### 3.7 Public catalog API
+
+| Endpoint | Returns |
+|---|---|
+| `GET /v1/categories` | The category tree |
+| `GET /v1/products?category=&q=&limit=&cursor=` | Active products: title, category, lowest active price, first image |
+| `GET /v1/products/{id}` | An active product with its options, active variants and images; `404` for drafts and archived products |
+
+- **Category filter:** `category` is a slug and includes subcategories.
+- **Search** uses PostgreSQL full-text search (Q5):
+  - a generated `tsvector` over the title (weight A) and description (weight B), with a GIN index;
+  - `websearch_to_tsquery('english', q)`;
+  - ordered by rank, then newest first.
+- **Pagination:** browsing pages by product id, newest first (keyset). Ranked search results page by offset, capped at 1,000 results.
+- **Caching:** `Cache-Control: public, max-age=30` and an `ETag` hashed from the body. Product reads may lag by up to 30 s, which FR-CAT3 allows, and checkout always re-prices (Q6).
+
+### 3.8 Product images
+
+```mermaid
+sequenceDiagram
+    participant A as Admin client
+    participant API as api role
+    participant S3 as Object storage
+    A->>API: POST /images {content_type, size_bytes}
+    API->>API: insert image PENDING
+    API-->>A: 201 {image, upload: url, headers, expires_at}
+    A->>S3: PUT bytes with the signed headers
+    S3-->>A: 200
+    A->>API: POST /images/{id}/complete
+    API->>S3: HEAD object
+    S3-->>API: size, type
+    API->>API: image READY, appended to the gallery
+    API-->>A: 200 image
+```
+
+- **Limits:** JPEG, PNG or WebP; up to 5 MiB; up to 10 images per product.
+- **Upload URL:** valid for 5 minutes. It signs `Content-Type`, `Content-Length` and, locally, `x-amz-acl: public-read`, so storage refuses any other size or type (the ADR-015 spike).
+- **Key:** `products/{productId}/{imageId}.{ext}`.
+- **Completion** checks the stored object. A missing object gets `409 upload_not_found`, and a different size or type `422 upload_mismatch`.
+- **Deletion** removes the row at once and schedules the object's deletion as the task `catalog.delete-image-object`, so the API never waits on storage.
+- **Abandoned uploads:** the hourly recurring task `catalog.expire-pending-images` removes uploads still pending after 24 hours, with their objects.
+- **Public URL:** `ecom.media.public-base-url` plus the key. That is S3Proxy locally and CloudFront in AWS (phase 17).
+
+**Object storage port** (platform API; the adapter uses the AWS SDK v2):
+
+```java
+public interface ObjectStorage {
+    PresignedUpload presignUpload(String key, String contentType, long sizeBytes, Duration validity);
+    Optional<StoredObject> find(String key);
+    void delete(String key);
+    URI publicUrl(String key);
+}
+```
+
+- **HTTP client:** the SDK's URL-connection client, with a 1 s connect and 5 s read timeout.
+- **Not a readiness dependency.** Without storage, images cannot be uploaded; nothing else stops.
+
+### 3.9 Database
+
+Two new schemas, each with its module's migrations. Table details are in [database.md](database.md).
+
+| Schema | Tables |
+|---|---|
+| `catalog` | `categories`; `products`, with the generated `search_vector`; `variants`; `product_images` |
+| `customer` | `customers`, with a unique `subject`; `addresses`, with a partial unique index on the default |
+
+Foreign keys stay inside a schema. Personal data (names, emails, phones, addresses) exists only in `customer` and is never logged.
+
+### 3.10 Module APIs
+
+None yet. Each query another module needs is added with its first consumer:
+
+- SKU details and list prices for Cart and Pricing (phase 4);
+- address snapshots for Ordering (phase 6).
+
+### 3.11 OpenAPI document
+
+Per [ADR-016](decisions/ADR-016-openapi-from-code.md):
+
+- springdoc-openapi 3.1 generates the document from the controllers, and serves it on the management port at `/actuator/openapi`.
+- It declares a bearer-token security scheme, and protected operations name it.
+- `docs/api/openapi.json` is committed. `OpenApiDocumentTests` fails if the file is stale, and `./gradlew updateOpenApi` rewrites it.
+
+### 3.12 Local environment and demo
+
+`docker compose up` adds:
+
+| Service | Image | Host port | Notes |
+|---|---|---|---|
+| `keycloak` | `quay.io/keycloak/keycloak:26.8.0` | 8180 | Development mode; imports the realm |
+| `s3proxy` | `andrewgaul/s3proxy:4.1.1` | 9000 | Signature V4 with local credentials; filesystem storage in a volume |
+| `media-bucket` | `curlimages/curl` | — | Runs once: creates the bucket, then exits |
+
+The app signs upload URLs for `http://localhost:9000`, which the host can reach. It makes its own storage calls to `http://s3proxy:80` inside the network.
+
+`scripts/demo-catalog.sh` walks through the phase with `curl`:
+
+1. Gets tokens for the demo users.
+2. Creates a category, a product and two variants, and activates the product.
+3. Uploads an image through its pre-signed URL, and completes it.
+4. Browses and searches as an anonymous visitor.
+5. Adds addresses as one customer, and shows another customer getting `404` for them.
+
+The CI container job runs the same script against the compose stack.
+
+### 3.13 Configuration
+
+| Property | Default | Notes |
+|---|---|---|
+| `ecom.security.issuer` | `http://localhost:8180/realms/ecommerce` | Expected `iss` |
+| `ecom.security.jwk-set-uri` | `http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs` | The internal URL in compose |
+| `ecom.security.audience` | `ecommerce-api` | Expected in `aud` |
+| `ecom.media.bucket`, `region` | `ecommerce-media`, `ap-south-1` | |
+| `ecom.media.endpoint`, `presign-endpoint` | Unset, meaning AWS | Compose: `http://s3proxy:80` and `http://localhost:9000` |
+| `ecom.media.public-base-url` | `http://localhost:9000/ecommerce-media` | CloudFront in AWS |
+| `ecom.media.object-acl` | `public-read` | `none` in AWS |
+| `ecom.media.access-key`, `secret-key` | Unset | Compose and tests only; AWS uses the default credential chain |
+
+### 3.14 Tests
+
+| Test | Proves |
+|---|---|
+| `TokenValidationTests` | Expired, wrong-issuer, wrong-audience, forged and `alg: none` tokens get `401` problem+json. A valid token without the role gets `403`. Public and management endpoints need no token |
+| `CustomerProfileTests` | The first call creates the profile once, even when calls are concurrent. Name and phone can be changed; invalid phones are refused |
+| `AddressTests` | Add, read, replace and delete; at most 10; the default rules; PIN code and state validation |
+| `CrossCustomerAccessTests` | Customer B gets `404` for every read, replace, delete and make-default on customer A's addresses, and A's data is unchanged. Staff roles cannot use `/v1/me` |
+| `CategoryTests` | Tree, slugs, depth limit, no cycles, admin only |
+| `ProductAdminTests` | Drafts, variants, activation rules and archiving; `If-Match` (`412`, `428`); option rules; case-insensitive SKU uniqueness; audit entries |
+| `ProductBrowsingTests` | Drafts and archived products stay hidden. The category filter includes subcategories. Search is ranked. Cursor pages have no gaps or repeats. `ETag`, `304` and cache headers |
+| `ProductImageTests` | Against S3Proxy: an upload through the signed URL completes; storage refuses a wrong size or type; completion detects missing and mismatched objects; deletion and expiry remove objects through tasks; the public URL serves the image |
+| `OpenApiDocumentTests` | The committed document matches the code |
+| Unit tests | PIN codes, phones, SKUs, option combinations, the category tree, cursors |
+
+### 3.15 Exit criteria
+
+| Criterion | Shown by |
+|---|---|
+| API tests for catalog and customers | The tests above |
+| Cross-customer access is refused | `CrossCustomerAccessTests`, and the demo script against the real Keycloak in CI |
