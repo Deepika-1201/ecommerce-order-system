@@ -119,7 +119,7 @@ Modules raise `ApiException` (status, code, detail) for their own errors; the co
 
 - `./gradlew bootTestRun`: embedded PostgreSQL (data kept in `.embedded-pg/`, port 55433), `local` profile, both roles. No Docker needed.
 - `docker compose up --build`: PostgreSQL 17 (host port 5433) and the app (8080, 8081).
-- **Change from the plan:** each later phase adds the containers it needs (Kafka in phase 2, Keycloak and MinIO in phase 3, the gateway in phase 7, Mailpit in phase 9, the scheduler in phase 10, Grafana LGTM in phase 12), so `docker compose up` starts only what the code uses.
+- **Change from the plan:** each later phase adds the containers it needs (Keycloak and MinIO in phase 3, the gateway in phase 7, Kafka and Mailpit in phase 9, the scheduler in phase 10, Grafana LGTM in phase 12), so `docker compose up` starts only what the code uses.
 
 ### 1.10 Container image
 
@@ -149,3 +149,202 @@ Two stages: JDK 25 to build, JRE 25 to run. The jar is extracted in layers (depe
 | `./gradlew build` green in CI | The build job |
 | The app starts in both roles | The role tests; the compose smoke test in CI |
 | A forbidden module dependency fails the build | `ModuleBoundaryEnforcementTests` and `ModularityTests`. Checked by hand once: a catalog class using an inventory-internal type failed the build with "Module 'catalog' depends on module 'inventory' … Allowed targets: platform, shared" |
+
+## 2. Platform: messages, tasks, idempotency, audit (phase 2)
+
+### 2.1 Scope
+
+Phase 2 builds the machinery every later phase relies on ([ADR-008](decisions/ADR-008-transactional-outbox.md), [ADR-010](decisions/ADR-010-idempotency.md), [ADR-003](decisions/ADR-003-job-scheduler-integration.md)):
+
+- **Messages:** the outbox, the in-process dispatcher, the Kafka relay, deduplication of processed messages, and LISTEN/NOTIFY wake-ups.
+- **Tasks:** the `TaskScheduler` port with its in-process adapter, including recurring tasks.
+- **API idempotency keys** and the **audit log**.
+- **Basics:** time-ordered ids (UUIDv7), a microsecond clock, `@WorkerComponent`.
+
+Not yet: real message types (phases 5–9), the Kafka container (phase 9, with the first integration event; phase 2 tests the relay on embedded Kafka, a correction to §1.9), the Job Scheduler adapter (phase 10), metrics (phase 12).
+
+### 2.2 Publishing
+
+```java
+@MessageType(name = "inventory.stock-reserved", version = 1)            // topic = "…" for integration events
+public record StockReserved(UUID orderId, UUID reservationId, Instant expiresAt) { }
+
+messages.publish(new StockReserved(...),
+        new Origin("reservation", reservationId, reservationVersion),    // aggregate and its version
+        Correlation.causedBy(incoming));                                // or Correlation.start(orderId)
+```
+
+- `Messages.publish` runs only inside the caller's transaction (`MANDATORY`), so a message exists if and only if its state change committed.
+- **Routing by type and version.** The platform writes one outbox row per internal handler subscribed to the type and version, plus one row for the type's Kafka topic, if it has one. A type with no route is a programming error and fails the publish.
+- The envelope ([event model §2](event-model.md#2-envelope)) is serialized once and stored as text; `source` is derived from the payload's module.
+- The same transaction issues `NOTIFY ecom_outbox`, which PostgreSQL delivers at commit.
+
+`platform.outbox`:
+
+| Column | Notes |
+|---|---|
+| `id` | Identity; row identity only, not delivery order |
+| `message_id` | UUIDv7; unique per `destination` |
+| `destination` | `handler:<consumer>` or `kafka:<topic>` |
+| `aggregate_type`, `aggregate_id`, `sequence` | Delivery order within an aggregate |
+| `type`, `envelope` | Message type; the serialized envelope |
+| `attempts`, `next_attempt_at`, `last_error` | Retries |
+| `parked_at`, `delivered_at` | Terminal states; `NULL` in both means pending |
+
+### 2.3 Ordering per aggregate, without lanes (amends ADR-008)
+
+A pending row is **eligible** only if no earlier pending row exists for the same destination and aggregate, where "earlier" means a lower `(sequence, id)`. Workers claim eligible rows with `FOR UPDATE SKIP LOCKED`.
+
+- **Why `sequence`, not `id`:** identity values are allocated at insert but become visible at commit, which can happen in a different order. An aggregate's version is assigned under its row lock, so it follows commit order.
+- **Why no lanes:** the eligibility rule already gives per-aggregate order. Different aggregates are delivered in parallel by any number of workers, with no leases to manage.
+- **A failing row blocks only its own aggregate.** A parked row (see §2.4) keeps blocking it until an operator re-drives or discards it.
+
+### 2.4 Dispatching to handlers
+
+```java
+@HandlesMessage(consumer = "inventory.reserve-stock")
+void on(IncomingMessage<ReserveStock> message) { ... }
+```
+
+Each delivery is one transaction:
+
+1. Claim one eligible row.
+2. Skip the handler if `processed_messages` already has (consumer, message id).
+3. Run the handler.
+4. Insert the `processed_messages` row.
+5. Mark the outbox row delivered.
+
+If the handler throws, everything rolls back. A second transaction then increments `attempts` and sets `next_attempt_at` with jittered exponential backoff (1 s doubling to 5 min). After 10 failures, or at once for an unreadable payload, the row is parked.
+
+Handler rules:
+
+- Handlers are idempotent.
+- They may publish messages and schedule tasks in the same transaction.
+- They **never call external systems.** They record intent and schedule a task, so transactions stay short and retries stay safe.
+- `correlation_id` and `message_id` are in the MDC while a handler runs.
+
+Within one process the transaction already makes effects exactly-once. The `processed_messages` guard is there so that handlers behave the same when V2 moves these channels to Kafka.
+
+### 2.5 Relaying to Kafka
+
+Each relay transaction:
+
+1. Claims up to 100 eligible `kafka:` rows. The eligibility rule allows at most one row per aggregate in a batch.
+2. Sends them all. The key is the aggregate id, the value is the envelope, and the headers are `type`, `version` and `traceparent`.
+3. Waits up to 10 s for every acknowledgement.
+4. Marks the rows delivered and commits.
+
+Any failure rolls back the batch and backs it off. A crash after the acknowledgements but before commit sends the batch again: delivery is at-least-once, and consumers deduplicate on `message_id`.
+
+The producer uses `acks=all` with idempotence enabled. Kafka is not a readiness dependency: while it is down, the outbox buffers (NFR-8).
+
+### 2.6 Waking up
+
+Each worker instance holds one connection that listens on `ecom_outbox` and `ecom_tasks`, and wakes the matching loops on each notification. Polling every 500 ms is the backstop. A broken listener reconnects with backoff, and polling covers the gap.
+
+### 2.7 Tasks
+
+```java
+taskScheduler.schedule(TaskRequest.of("fulfillment.book-shipment", payload)
+        .dedupeKey("shipment:" + shipmentId));                // MANDATORY transaction
+
+@HandlesTask(type = "fulfillment.book-shipment")
+void book(TaskExecution<BookShipment> task) { ... }          // runs outside any transaction
+
+@HandlesTask(type = "platform.cleanup", every = "1h")          // recurring
+void cleanup(TaskExecution<Void> task) { ... }
+```
+
+In-process adapter, table `platform.scheduled_tasks`:
+
+| Step | Behavior |
+|---|---|
+| Schedule | Insert in the caller's transaction and notify `ecom_tasks`. A `dedupe_key` is unique among pending and running tasks; a duplicate is ignored |
+| Claim | `UPDATE … SET status = 'RUNNING', attempts = attempts + 1, lease_until = now() + lease … RETURNING`, over due pending tasks and running tasks whose lease expired (a crashed worker) |
+| Run | The handler runs outside any transaction, with the task id as its idempotency key |
+| Complete | Only if still `RUNNING` with the same attempt number (fencing); a stale worker's completion is ignored |
+| Fail | Retry with exponential backoff (10 s doubling to 1 h); `DEAD` after the task's maximum attempts (default 10) |
+| Recurring | One active row per type, rescheduled at a fixed rate; missed runs collapse into one; a failed run waits for the next interval |
+
+Phase 10 replaces the adapter (submission through the outbox, the gRPC worker) and keeps this API.
+
+### 2.8 API idempotency keys
+
+```java
+return idempotency.execute(
+        IdempotentRequest.of(scope, idempotencyKeyHeader, "POST /v1/orders", requestBody),
+        () -> ResponseEntity.accepted().body(ordering.place(...)));
+```
+
+The key and the action share **one transaction**, so the action's effects and the stored response commit together:
+
+1. Delete the row if it has expired (after 24 hours).
+2. Insert the `(scope, key)` row with a 200 ms lock timeout.
+3. Then one of the following:
+   - **Inserted:** run the action, store its status, body and `Location`, and commit.
+   - **The key exists with a different fingerprint:** `422 idempotency_key_reused`.
+   - **The key exists with the same fingerprint:** replay the stored response with `Idempotent-Replayed: true`.
+   - **The lock timeout fired** (another request with this key is still running): `409 idempotency_request_in_progress` with `Retry-After: 1`.
+
+- **Fingerprint:** SHA-256 of the operation and the canonical JSON of the parsed body, so reformatting the JSON does not change it.
+- **Releasing the key:** if the action throws, the rollback removes the key, so the client can retry.
+- **Bad keys:** a missing key is `400 idempotency_key_required`; one that is not 1–255 printable ASCII characters is `400 invalid_idempotency_key`.
+
+### 2.9 Audit log
+
+`AuditLog.record(AuditEntry)` runs in the caller's transaction.
+
+- **Columns:** actor type and id, action, target type and id, reason, details (JSON), plus `request_id` and `correlation_id` taken from the MDC.
+- **Append-only:** a trigger rejects `UPDATE` and `DELETE`. Retention will drop old monthly partitions, which row triggers do not block.
+
+### 2.10 Identifiers and time
+
+- `Ids.newId()`: UUIDv7 from `SecureRandom`, with 74 random bits, so it is unguessable as well as time-ordered.
+- **Clock:** a `Clock` bean in UTC that ticks in microseconds, the precision of `timestamptz`.
+- **Due times and leases** are compared with PostgreSQL's `now()`, so instances never disagree about time.
+
+### 2.11 Configuration
+
+| Property | Default |
+|---|---|
+| `ecom.workers.autostart` | `true`. Tests set `false` and drive the loops directly |
+| `ecom.messaging.dispatcher-concurrency` | 4 |
+| `ecom.messaging.poll-interval` | 500 ms |
+| `ecom.messaging.max-attempts` | 10 |
+| `ecom.messaging.initial-backoff`, `max-backoff` | 1 s, 5 min |
+| `ecom.messaging.relay-batch-size`, `relay-send-timeout` | 100, 10 s |
+| `ecom.tasks.concurrency`, `default-lease` | 4, 5 min |
+| `ecom.cleanup.delivered-messages`, `processed-messages`, `finished-tasks` | 7 days, 30 days, 30 days |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` |
+
+### 2.12 Cleanup
+
+The recurring task `platform.cleanup` runs every hour. In batches of 1,000 rows, it deletes:
+
+- delivered outbox rows older than 7 days;
+- processed-message records older than 30 days;
+- expired idempotency keys;
+- succeeded or dead tasks older than 30 days.
+
+### 2.13 Tests
+
+Each crash between steps is simulated by rolling back at that step, then running the next attempt.
+
+| Test | Proves |
+|---|---|
+| `MessagesTests` | Rollback leaves no message; commit fans out to every route; an unroutable type fails |
+| `DispatcherTests` | Failure rolls back the handler's effect and retries it, so the effect happens exactly once. A delivered message is never redelivered. An existing processed-message record skips the handler. Per-aggregate order holds while other aggregates continue. Parking and re-drive work. Four concurrent workers deliver 200 messages exactly once, in order per aggregate |
+| `BackgroundDeliveryTests` | With polling set to an hour, NOTIFY alone delivers a message within seconds |
+| `KafkaRelayTests` | Key, value and headers on embedded Kafka. A crash between the send and the commit resends, with the same `message_id`. At most one row per aggregate in a batch |
+| `KafkaUnavailableTests` | With an unreachable broker, rows stay pending and back off |
+| `TaskSchedulerTests` | Rollback leaves no task. Retries, then `DEAD`. Deduplication. A crashed worker's lease is reclaimed. Fencing ignores a stale completion. Recurring rescheduling. Two runners execute a task once |
+| `IdempotentRequestsTests` | Replay, `422`, `409` with `Retry-After`, release on failure, expiry |
+| `AuditLogTests` | Records in the caller's transaction; `UPDATE` and `DELETE` are rejected |
+| `IdsTests` | Version 7, variant, time order |
+
+### 2.14 Exit criteria
+
+| Criterion | Shown by |
+|---|---|
+| No lost effects across crashes between steps | `MessagesTests`, `DispatcherTests`, `KafkaRelayTests`, `TaskSchedulerTests` |
+| No duplicated effects | `DispatcherTests` (processed messages, concurrency), `IdempotentRequestsTests`, task fencing |

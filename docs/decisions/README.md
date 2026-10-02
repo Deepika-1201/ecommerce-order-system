@@ -11,7 +11,7 @@ Format: Context → Problem → Options considered → Decision → Trade-offs �
 | [ADR-005](ADR-005-postgresql.md) | PostgreSQL 17, a schema per module, Flyway, Spring Data JDBC and JdbcClient | Accepted |
 | [ADR-006](ADR-006-kafka.md) | Kafka as the event broker | Accepted |
 | [ADR-007](ADR-007-saga-orchestration.md) | Orchestrated saga for the order lifecycle; payment success is the pivot; choreography for side reactions | Accepted |
-| [ADR-008](ADR-008-transactional-outbox.md) | Transactional outbox with a polling relay, for internal commands, Kafka events and scheduler jobs | Accepted |
+| [ADR-008](ADR-008-transactional-outbox.md) | Transactional outbox with a polling relay, for internal commands, Kafka events and scheduler jobs; per-aggregate ordering by an eligibility rule | Accepted, amended |
 | [ADR-009](ADR-009-inventory-reservation.md) | Conditional updates and reservation records; hold expiry beyond the gateway's success window; flash-sale admission control | Accepted |
 | [ADR-010](ADR-010-idempotency.md) | Layered idempotency: API keys, domain uniqueness, message deduplication, outbound keys, guarded transitions | Accepted |
 | [ADR-011](ADR-011-event-versioning.md) | JSON Schema contracts in the repository, versioned event types; registry deferred | Accepted |

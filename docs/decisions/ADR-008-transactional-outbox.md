@@ -44,3 +44,13 @@ How are state changes and their messages made atomic, without distributed transa
 
 - No module ever sends a message directly; every message goes through the outbox in the same transaction as its cause.
 - Kafka, scheduler and in-process delivery all share the same at-least-once and per-key-order semantics.
+
+## Amendment (2026-10-02, phase 2 LLD)
+
+Lanes and leases are replaced by an **eligibility rule**: a pending row may be delivered only when no earlier pending row exists for the same destination and aggregate, where earlier means a lower `(sequence, id)`. Workers claim eligible rows with `FOR UPDATE SKIP LOCKED`.
+
+- **Order:** it follows the aggregate's version, which is assigned under its row lock, rather than identity values, which become visible in commit order rather than allocation order.
+- **Parallelism:** any number of workers can deliver different aggregates in parallel, with no leases to manage.
+- **Failures:** a failing or parked row blocks only its own aggregate, not a whole lane.
+
+Details in [LLD §2.3](../low-level-design.md#23-ordering-per-aggregate-without-lanes-amends-adr-008).
