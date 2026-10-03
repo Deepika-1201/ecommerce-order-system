@@ -43,11 +43,14 @@ CREATE TABLE orders (
     CONSTRAINT orders_number_unique UNIQUE (number),
     -- One order per quote (LLD §6.3).
     CONSTRAINT orders_quote_unique UNIQUE (quote_id),
+    -- CASE, not OR: a CHECK that evaluates to NULL passes, and reason IN (...) is NULL when the reason is.
     CONSTRAINT orders_reason CHECK (
-        (status = 'REJECTED' AND reason IN ('OUT_OF_STOCK', 'COUPON_UNAVAILABLE', 'PAYMENTS_UNAVAILABLE'))
-        OR (status = 'CANCELLED' AND reason IN ('CUSTOMER', 'SUPPORT', 'PAYMENT_FAILED', 'PAYMENT_EXPIRED',
-                                                'STOCK_LOST_AFTER_PAYMENT'))
-        OR (status NOT IN ('REJECTED', 'CANCELLED') AND reason IS NULL)),
+        CASE status
+            WHEN 'REJECTED' THEN coalesce(reason IN ('OUT_OF_STOCK', 'COUPON_UNAVAILABLE', 'PAYMENTS_UNAVAILABLE'), false)
+            WHEN 'CANCELLED' THEN coalesce(reason IN ('CUSTOMER', 'SUPPORT', 'PAYMENT_FAILED', 'PAYMENT_EXPIRED',
+                                                      'STOCK_LOST_AFTER_PAYMENT'), false)
+            ELSE reason IS NULL
+        END),
     CONSTRAINT orders_short_sku CHECK (coalesce(reason = 'OUT_OF_STOCK', false) = (short_sku IS NOT NULL)),
     CONSTRAINT orders_coupon CHECK ((coupon_id IS NULL) = (coupon_code IS NULL)),
     CONSTRAINT orders_refund CHECK ((refund_amount_paise IS NULL) = (refund_status IS NULL)),
@@ -110,11 +113,12 @@ CREATE TABLE order_processes (
     updated_at          timestamptz NOT NULL,
     CONSTRAINT order_processes_deadline CHECK ((step = 'DONE') = (deadline_at IS NULL)),
     CONSTRAINT order_processes_cancellation CHECK (
-        (cancel_reason IS NULL AND cancel_code IS NULL AND cancel_note IS NULL AND cancel_requested_at IS NULL)
-        OR (cancel_reason = 'CUSTOMER' AND cancel_code IS NULL AND cancel_note IS NULL
-            AND cancel_requested_at IS NOT NULL)
-        OR (cancel_reason = 'SUPPORT' AND cancel_code IS NOT NULL AND cancel_requested_at IS NOT NULL
-            AND (cancel_code <> 'OTHER' OR cancel_note IS NOT NULL)))
+        CASE cancel_reason
+            WHEN 'CUSTOMER' THEN cancel_code IS NULL AND cancel_note IS NULL AND cancel_requested_at IS NOT NULL
+            WHEN 'SUPPORT' THEN cancel_code IS NOT NULL AND cancel_requested_at IS NOT NULL
+                AND (cancel_code <> 'OTHER' OR cancel_note IS NOT NULL)
+            ELSE cancel_code IS NULL AND cancel_note IS NULL AND cancel_requested_at IS NULL
+        END)
 );
 
 -- The deadline sweep reads only processes that still wait for something (LLD §6.7).

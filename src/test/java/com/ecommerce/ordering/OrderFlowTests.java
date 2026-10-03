@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.entry;
 
 import com.ecommerce.payments.PaymentMessages.RefundInitiated;
 import com.ecommerce.platform.tasks.DueTasks;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.UUID;
@@ -31,6 +33,20 @@ class OrderFlowTests extends OrderingTest {
         assertStock(sku, 5, 2);
         assertCoupon(couponId, 1, 0);
         assertThat(payment(orderId)).isEqualTo("REQUIRES_PAYMENT");
+        Instant holdExpiry = instant("SELECT expires_at FROM inventory.reservations WHERE order_id = :id", orderId);
+        assertThat(Duration.between(Instant.now(), holdExpiry)).as("window, grace and margin")
+                .isBetween(Duration.ofMinutes(49), Duration.ofMinutes(50));
+        assertThat(instant("SELECT expires_at FROM payments.simulated_payments WHERE order_id = :id", orderId))
+                .as("the payment window ends before the grace and the margin")
+                .isEqualTo(holdExpiry.minus(Duration.ofMinutes(35)));
+        assertThat(jdbc.sql("SELECT DISTINCT envelope::jsonb ->> 'correlation_id' FROM platform.outbox "
+                        + "WHERE aggregate_id = :id")
+                .param("id", orderId.toString())
+                .query(String.class)
+                .list()).as("one flow").containsExactly(orderId.toString());
+        assertThat(envelopeField("pricing.reserve-coupon", "causation_id", orderId))
+                .as("caused by the reply before it")
+                .isEqualTo(envelopeField("inventory.stock-reserved", "message_id", orderId));
 
         payments.succeed(orderId);
         deliver();
@@ -201,5 +217,21 @@ class OrderFlowTests extends OrderingTest {
         assertThat(redemption(orderId)).isEqualTo("RELEASED");
         assertCoupon(couponId, 0, 0);
         assertStock(sku, 2, 2);
+    }
+
+    private Instant instant(String sql, UUID orderId) {
+        return jdbc.sql(sql)
+                .param("id", orderId)
+                .query((row, n) -> row.getObject(1, OffsetDateTime.class).toInstant())
+                .single();
+    }
+
+    private String envelopeField(String type, String field, UUID orderId) {
+        return jdbc.sql("SELECT envelope::jsonb ->> :field FROM platform.outbox WHERE type = :type AND aggregate_id = :id")
+                .param("field", field)
+                .param("type", type)
+                .param("id", orderId.toString())
+                .query(String.class)
+                .single();
     }
 }

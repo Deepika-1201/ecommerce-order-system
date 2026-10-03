@@ -152,9 +152,7 @@ final class OrderingApi {
                             totals.shippingPaise(), totals.taxableValuePaise(), totals.cgstPaise(), totals.sgstPaise(),
                             totals.igstPaise(), totals.taxPaise(), totals.grandTotalPaise()),
                     OrderAddressResponse.of(view.deliveryAddress()), OrderAddressResponse.of(view.billingAddress()),
-                    order.status() == OrderStatus.AWAITING_PAYMENT && order.checkoutUrl() != null
-                            ? URI.create(order.checkoutUrl())
-                            : null,
+                    order.checkoutUrl() == null ? null : URI.create(order.checkoutUrl()),
                     order.refundStatus() == null ? null
                             : new OrderRefundResponse(order.refundAmountPaise(), order.refundStatus()),
                     order.placedAt(), order.updatedAt());

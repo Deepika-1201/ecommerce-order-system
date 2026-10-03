@@ -3,6 +3,7 @@ package com.ecommerce.ordering.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecommerce.ordering.OrderingTest;
+import com.ecommerce.platform.tasks.DueTasks;
 import com.ecommerce.support.Eventually;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -28,6 +29,9 @@ class DeadlineTests extends OrderingTest {
 
     @Autowired
     private DeadlineSweep sweep;
+
+    @Autowired
+    private OrderRepository orderRepository;
 
     @Autowired
     private DataSource dataSource;
@@ -74,12 +78,66 @@ class DeadlineTests extends OrderingTest {
         payments.startAttempt(orderId);
 
         deadlinePasses(orderId);
+        long checked = version(orderId);
         deliver();
 
         assertThat(step(orderId)).isEqualTo("AWAITING_PAYMENT");
         assertThat(processed("ordering.payment-pending")).isOne();
+        assertThat(version(orderId)).as("the pending payment moved the deadline").isEqualTo(checked + 1);
         assertThat(Duration.between(Instant.now(), deadline(orderId)))
                 .isBetween(Duration.ofMinutes(4), OrderProcess.RECHECK_INTERVAL);
+    }
+
+    @Test
+    void aSweepEveryMinuteActsOnEveryProcessPastItsDeadline() {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID first = placeOrder(asha, sku, 1, null);
+        UUID second = placeOrder(ravi, sku, 1, null);
+        UUID notDue = placeOrder(asha, sku, 1, null);
+        overdue(first, 2);
+        overdue(second, 1);
+
+        DueTasks.runRecurring(context, SWEEP);
+
+        assertThat(attempts(first)).isEqualTo(2);
+        assertThat(attempts(second)).isEqualTo(2);
+        assertThat(attempts(notDue)).isOne();
+        assertThat(jdbc.sql("SELECT every_seconds FROM platform.scheduled_tasks WHERE type = :type")
+                .param("type", SWEEP)
+                .query(Long.class)
+                .single()).as("the sweep runs every minute").isEqualTo(60);
+    }
+
+    @Test
+    void theSweepTakesTheLongestOverdueFirst() {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID recent = placeOrder(asha, sku, 1, null);
+        UUID oldest = placeOrder(ravi, sku, 1, null);
+        UUID notDue = placeOrder(asha, sku, 1, null);
+        overdue(recent, 1);
+        overdue(oldest, 60);
+
+        assertThat(orderRepository.overdue(Instant.now(), 1)).containsExactly(oldest);
+        assertThat(orderRepository.overdue(Instant.now(), 5)).containsExactly(oldest, recent).doesNotContain(notDue);
+    }
+
+    @Test
+    void anOrderWhoseDeadlineFailsDoesNotHoldBackTheOthers(CapturedOutput output) {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID broken = placeOrder(asha, sku, 1, null);
+        UUID healthy = placeOrder(ravi, sku, 1, null);
+        // A state no decision produces: refunding with no refund to ask for again.
+        jdbc.sql("UPDATE ordering.order_processes SET step = 'REFUNDING' WHERE order_id = :id")
+                .param("id", broken)
+                .update();
+        overdue(broken, 2);
+        overdue(healthy, 1);
+
+        DueTasks.runRecurring(context, SWEEP);
+
+        assertThat(output).contains("The deadline of order " + broken + " failed");
+        assertThat(attempts(broken)).as("rolled back").isOne();
+        assertThat(attempts(healthy)).isEqualTo(2);
     }
 
     @Test
@@ -116,10 +174,7 @@ class DeadlineTests extends OrderingTest {
     void twoSweepsAtOnceActOnce() throws Exception {
         String sku = product("Steel bottle", 59_900, 5);
         UUID orderId = placeOrder(asha, sku, 1, null);
-        jdbc.sql("UPDATE ordering.order_processes SET deadline_at = :past WHERE order_id = :id")
-                .param("past", OffsetDateTime.now(ZoneOffset.UTC).minusSeconds(1))
-                .param("id", orderId)
-                .update();
+        overdue(orderId, 1);
 
         try (Connection gate = dataSource.getConnection();
                 ExecutorService executor = Executors.newFixedThreadPool(2)) {
@@ -145,6 +200,14 @@ class DeadlineTests extends OrderingTest {
 
         assertThat(attempts(orderId)).isEqualTo(2);
         assertThat(pending(orderId)).containsExactly("inventory.reserve-stock", "inventory.reserve-stock");
+    }
+
+    /** Moves the process's deadline this many seconds into the past, without running the sweep. */
+    private void overdue(UUID orderId, int seconds) {
+        jdbc.sql("UPDATE ordering.order_processes SET deadline_at = :past WHERE order_id = :id")
+                .param("past", OffsetDateTime.now(ZoneOffset.UTC).minusSeconds(seconds))
+                .param("id", orderId)
+                .update();
     }
 
     private int processed(String consumer) {

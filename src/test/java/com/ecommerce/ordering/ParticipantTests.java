@@ -273,6 +273,16 @@ class ParticipantTests extends OrderingTest {
     }
 
     @Test
+    void onlyASuccessfulPaymentIsRefunded() {
+        UUID unpaid = createdPayment();
+
+        assertThatThrownBy(() -> command(new RefundPayment(unpaid, 123_400, RefundReason.ORDER_CANCELLED), unpaid))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("cannot be refunded: its payment is REQUIRES_PAYMENT");
+        assertThat(refunds(unpaid)).isEmpty();
+    }
+
+    @Test
     void thePaymentSimulatorRefusesWhatAPaymentsStatusDoesNotAllow() {
         UUID cancelled = createdPayment();
         command(new CancelPayment(cancelled), cancelled);

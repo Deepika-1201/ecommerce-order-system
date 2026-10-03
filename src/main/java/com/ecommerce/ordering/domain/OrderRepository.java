@@ -50,16 +50,9 @@ class OrderRepository {
         return "EC%09d".formatted(next);
     }
 
-    boolean quoteOrdered(UUID quoteId) {
-        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM ordering.orders WHERE quote_id = :quoteId)")
-                .param("quoteId", quoteId)
-                .query(Boolean.class)
-                .single();
-    }
-
     /**
-     * Inserts a placed order, its lines and its started process. {@code quote_id} is unique: a concurrent order from
-     * the same quote fails with {@code DuplicateKeyException} once the other commits.
+     * Inserts a placed order, its lines and its started process. {@code quote_id} is unique, so a second order from
+     * the quote fails with {@code DuplicateKeyException}, once the first commits if they are concurrent (LLD §6.3).
      */
     void insert(Order order, OrderProcess process, Instant now) {
         Quote.Totals totals = order.totals();

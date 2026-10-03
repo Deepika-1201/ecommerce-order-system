@@ -65,18 +65,13 @@ public class OrderService {
             throw new ApiException(HttpStatus.CONFLICT, "quote_expired",
                     "This quote has expired: quote the cart again.");
         }
-        if (orders.quoteOrdered(quoteId)) {
-            throw alreadyOrdered();
-        }
         AddressSnapshot delivery = snapshot(customerId, deliveryAddressId);
         if (delivery.state() != quote.deliveryState()) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT, "address_state_mismatch",
                     "The delivery address is in " + delivery.state().displayName() + ", but the quote's GST is for "
                             + quote.deliveryState().displayName() + ": quote the cart for the address's state.");
         }
-        AddressSnapshot billing = billingAddressId == null || billingAddressId.equals(deliveryAddressId)
-                ? delivery
-                : snapshot(customerId, billingAddressId);
+        AddressSnapshot billing = billingAddressId == null ? delivery : snapshot(customerId, billingAddressId);
         UUID orderId = Ids.newId();
         Order order = new Order(orderId, orders.nextNumber(), customerId, quoteId, OrderStatus.PLACED, null, null,
                 quote.taxRegime(), quote.supplyState(), quote.deliveryState(), quote.couponId(), quote.couponCode(),
@@ -89,8 +84,9 @@ public class OrderService {
                 quote.totals().grandTotalPaise(), stock, delivery.id()), settings, now);
         try {
             orders.insert(order, process, now);
-        } catch (DuplicateKeyException concurrentOrder) {
-            throw alreadyOrdered();
+        } catch (DuplicateKeyException quoteOrdered) {
+            throw new ApiException(HttpStatus.CONFLICT, "quote_already_ordered",
+                    "An order was already placed from this quote.");
         }
         processes.publish(process, Correlation.start(orderId.toString()));
         return new OrderView(order, delivery, billing);
@@ -169,11 +165,6 @@ public class OrderService {
                 ? delivery
                 : customers.addressSnapshot(order.billingAddressId()).orElseThrow();
         return new OrderView(order, delivery, billing);
-    }
-
-    private static ApiException alreadyOrdered() {
-        return new ApiException(HttpStatus.CONFLICT, "quote_already_ordered",
-                "An order was already placed from this quote.");
     }
 
     private static ApiException notFound() {
