@@ -84,6 +84,16 @@
       "lastName": "Admin",
       "credentials": [{ "type": "password", "value": "admin-local-only", "temporary": false }],
       "realmRoles": ["admin"]
+    },
+    {
+      "username": "meera",
+      "enabled": true,
+      "email": "meera@example.com",
+      "emailVerified": true,
+      "firstName": "Meera",
+      "lastName": "Iyer",
+      "credentials": [{ "type": "password", "value": "meera-local-only", "temporary": false }],
+      "realmRoles": ["warehouse"]
     }
   ]
 }

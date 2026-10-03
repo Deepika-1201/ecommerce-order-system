@@ -32,12 +32,14 @@ docker compose up --build   # or: the whole stack in containers, with JSON logs
 ```bash
 scripts/demo-catalog.sh   # tokens, catalog admin, an image upload, anonymous browsing and search, addresses (curl and python3)
 scripts/demo-cart.sh      # a guest cart with a coupon, merged at sign-in; quotes with GST checked to the paise; owner-only access
+scripts/demo-inventory.sh # receipts and adjustments retried safely with Idempotency-Key; a SKU's movements; warehouse-only access
 ```
 
 | User | Password | Role |
 |---|---|---|
 | `asha`, `ravi` | `asha-local-only`, `ravi-local-only` | `customer` |
 | `admin` | `admin-local-only` | `admin` |
+| `meera` | `meera-local-only` | `warehouse` |
 
 These exist only in the local realm, whose `ecommerce-cli` client allows the password grant for scripts. To get a token: `curl -d grant_type=password -d client_id=ecommerce-cli -d username=asha -d password=asha-local-only localhost:8180/realms/ecommerce/protocol/openid-connect/token`.
 

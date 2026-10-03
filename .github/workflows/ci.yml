@@ -67,6 +67,8 @@ jobs:
         run: scripts/demo-catalog.sh
       - name: Phase 4 demo (guest cart, merge at sign-in, quotes with GST, owner-only access)
         run: scripts/demo-cart.sh
+      - name: Phase 5 demo (receipts and adjustments with Idempotency-Key, movements, warehouse-only access)
+        run: scripts/demo-inventory.sh
       - name: Show logs
         if: failure()
         run: docker compose logs
