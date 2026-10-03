@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| Status | Grows with each phase. Phase 3: identity, customers, catalog. Phase 4: carts, quotes, coupons |
+| Status | Grows with each phase. Phase 3: identity, customers, catalog. Phase 4: carts, quotes, coupons. Phase 5: warehouse stock |
 | Contract | `docs/api/openapi.json`, generated from the code and checked in CI ([ADR-016](decisions/ADR-016-openapi-from-code.md)) |
-| Design | [LLD §3](low-level-design.md#3-catalog-customers-and-identity-phase-3), [LLD §4](low-level-design.md#4-cart-pricing-and-coupons-phase-4) |
+| Design | [LLD §3](low-level-design.md#3-catalog-customers-and-identity-phase-3), [LLD §4](low-level-design.md#4-cart-pricing-and-coupons-phase-4), [LLD §5](low-level-design.md#5-inventory-phase-5) |
 
 ## 1. Conventions
 
@@ -41,6 +41,7 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 | `invalid_cursor` | 400 | The pagination cursor was not issued by this API |
 | `invalid_options`, `invalid_option_values` | 400 | A product's options, or a variant's option values, break the option rules |
 | `invalid_coupon_rule` | 400 | A coupon's fields do not match its kind, or its window ends before it starts |
+| `invalid_adjustment` | 400 | A stock adjustment's sign does not match its reason |
 | `idempotency_key_required`, `invalid_idempotency_key` | 400 | `Idempotency-Key` is missing, or not 1–255 printable characters |
 | `unauthorized` | 401 | No token, or the token is invalid or expired |
 | `forbidden` | 403 | The token lacks the role |
@@ -55,6 +56,7 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 | `cart_full`, `cart_empty`, `cart_has_unavailable_items` | 409 | A cart already has 50 lines (also when merging); a quote of an empty cart; a quote of a cart with lines that can no longer be bought |
 | `coupon_exhausted`, `coupon_already_used` | 409 | The coupon's total limit, or the customer's own limit, is used up |
 | `coupon_code_taken`, `limit_below_usage` | 409 | Coupon administration: the code exists; a limit below current usage |
+| `adjustment_below_reserved` | 409 | A stock adjustment would leave fewer units on hand than orders have reserved |
 | `precondition_failed` | 412 | `If-Match` does not match the current version |
 | `idempotency_key_reused`, `upload_mismatch` | 422 | The key was used for a different request; the uploaded object is not what was announced |
 | `unknown_category` | 422 | The category or parent category in the body does not exist |
@@ -62,6 +64,7 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 | `coupon_not_found`, `coupon_not_yet_valid`, `coupon_expired`, `coupon_requires_sign_in`, `coupon_minimum_not_met` | 422 | The coupon cannot apply to this cart; see [LLD §4.9](low-level-design.md#49-coupons) |
 | `precondition_required` | 428 | `If-Match` is required |
 | `internal_error` | 500 | Unexpected; details are in the logs under the request id |
+| `stock_busy` | 503 | A stock item stayed locked longer than the lock timeout; see `Retry-After` |
 
 ## 4. Lists
 
@@ -74,7 +77,7 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 - **Public reads** carry `Cache-Control: public, max-age=30` (a day for reference data such as `/v1/states`) and an `ETag`; `If-None-Match` gets `304 Not Modified`. Everything else is `Cache-Control: no-store`.
 - **Concurrent edits:** a product's `ETag` is its version. `PATCH` needs `If-Match`: a stale version gets `412`, and a missing header `428`.
 - **Carts:** each write sets one line's quantity, so retries and concurrent tabs are safe without `If-Match`. A cart's `ETag` is its version; sending it in `If-Match` makes a write conditional (`412` when stale).
-- **Retries:** `Idempotency-Key` is required where a retry must not repeat an effect: order placement, cancellations and staff money actions, from phase 6 ([ADR-010](decisions/ADR-010-idempotency.md)).
+- **Retries:** `Idempotency-Key` is required where a retry must not repeat an effect: stock receipts and adjustments (phase 5); order placement, cancellations and staff money actions (phase 6) ([ADR-010](decisions/ADR-010-idempotency.md)).
 
 ## 6. Endpoints
 
@@ -94,5 +97,7 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 | `POST /v1/me/cart/merge` (with `Cart-Token`); `POST /v1/me/cart/quotes`; `GET /v1/me/cart/quotes/{id}` | `customer` | 4 |
 | `POST /v1/guest/cart`; the cart, line, coupon and quote endpoints above under `/v1/guest/cart`, with `Cart-Token` | Anyone | 4 |
 | `GET`, `POST /v1/admin/pricing/coupons`; `GET`, `PATCH /v1/admin/pricing/coupons/{id}` | `admin` | 4 |
+| `GET /v1/warehouse/stock`; `GET /v1/warehouse/stock/{sku}`; `GET /v1/warehouse/stock/{sku}/movements` | `warehouse` | 5 |
+| `POST /v1/warehouse/stock/{sku}/receipts`, `POST /v1/warehouse/stock/{sku}/adjustments` (with `Idempotency-Key`) | `warehouse` | 5 |
 
 The OpenAPI document has the request and response schemas. Locally it is also served at `http://localhost:8081/actuator/openapi`.

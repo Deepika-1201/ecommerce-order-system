@@ -91,7 +91,7 @@ Each scenario lists:
   ```
 
   Under READ COMMITTED, the second transaction waits for the first one's row lock, then re-checks the `WHERE` clause against the committed row and finds no stock.
-- **Recovery:** the loser tries to reclaim expired holds on that SKU once; if none exist, its order is rejected (`OUT_OF_STOCK`).
+- **Recovery:** the loser rolls back, reclaims expired holds on its SKUs in a new transaction, and tries once more. If it is still short, its order is rejected (`OUT_OF_STOCK`).
 - **Consistency:** strong, because the row is the single gate.
 - **Compensation:** none.
 - **Duplicates:** none.

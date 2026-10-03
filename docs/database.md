@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| Status | Grows with each module's schema. Phase 2 (platform), phase 3 (catalog, customer), phase 4 (cart, pricing) |
-| Decisions | [ADR-005](decisions/ADR-005-postgresql.md) (PostgreSQL, a schema per module), [ADR-008](decisions/ADR-008-transactional-outbox.md) (outbox), [ADR-010](decisions/ADR-010-idempotency.md) (idempotency) |
+| Status | Grows with each module's schema. Phase 2 (platform), phase 3 (catalog, customer), phase 4 (cart, pricing), phase 5 (inventory) |
+| Decisions | [ADR-005](decisions/ADR-005-postgresql.md) (PostgreSQL, a schema per module), [ADR-008](decisions/ADR-008-transactional-outbox.md) (outbox), [ADR-009](decisions/ADR-009-inventory-reservation.md) (reservations), [ADR-010](decisions/ADR-010-idempotency.md) (idempotency), [ADR-021](decisions/ADR-021-stock-movements.md) (stock movements) |
 
 ## 1. Conventions
 
@@ -98,3 +98,25 @@ erDiagram
 
 - Quotes are immutable, and deleted a day after they expire; orders keep their own copy (phase 6).
 - The coupon counters are changed only by conditional updates ([LLD §4.10](low-level-design.md#410-coupon-redemptions)).
+
+## 7. `inventory` (phase 5)
+
+```mermaid
+erDiagram
+    locations ||--o{ stock_items : "location_code"
+    stock_items ||--o{ stock_movements : "sku, location_code"
+    reservations ||--|{ reservation_lines : "reservation_id"
+```
+
+| Table | Columns | Constraints and indexes |
+|---|---|---|
+| `locations` | `code`, `name`, `created_at` | Primary key `code`. One row in V1: `BLR1` |
+| `stock_items` | `sku`, `location_code`, `on_hand`, `reserved`, `version`, `created_at`, `updated_at` | Primary key `(sku, location_code)`; `0 ≤ reserved ≤ on_hand` |
+| `reservations` | `id`, `order_id`, `status`, `expires_at`, `short_sku`, `short_available`, `version`, `created_at`, `updated_at` | `order_id` unique; `expires_at` required while `HELD`; `short_sku` and `short_available` exactly when `REJECTED`; `(expires_at)` partial on `HELD`, for expiry |
+| `reservation_lines` | `reservation_id`, `sku`, `location_code`, `quantity` | Primary key `(reservation_id, sku, location_code)`; `quantity` at least 1 |
+| `stock_movements` | `id`, `sku`, `location_code`, `kind`, `quantity`, `reason`, `note`, `reference`, `order_id`, `on_hand_after`, `actor_id`, `created_at` | References `stock_items`; the sign of `quantity` matches `kind` and `reason`; `reason` exactly for adjustments, `order_id` exactly for handovers and returns; `(order_id, kind, sku, location_code)` unique; `(sku, location_code, id)`, for a SKU's history |
+
+- The counters change only by conditional updates ([LLD §5.4](low-level-design.md#54-reserving)).
+- Movements are never updated or deleted, and a stock item's `on_hand` equals the sum of its movements ([ADR-021](decisions/ADR-021-stock-movements.md)).
+- Reservation lines have no foreign key to `stock_items`: a rejected reservation can name a SKU that has no stock item.
+- Reservations are kept, like the orders they belong to.

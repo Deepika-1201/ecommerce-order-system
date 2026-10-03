@@ -85,15 +85,18 @@ stateDiagram-v2
     HELD --> COMMITTED : payment succeeded
     HELD --> RELEASED : payment failed, expired or cancelled, or order cancelled
     HELD --> EXPIRED : hold expiry passed, reclaimed
+    EXPIRED --> COMMITTED : payment succeeded, stock taken again
     COMMITTED --> FULFILLED : handed over to carrier
     COMMITTED --> RELEASED : order cancelled before handover
+    FULFILLED --> RETURNED : returned to origin, restocked
     FULFILLED --> [*]
+    RETURNED --> [*]
     RELEASED --> [*]
     EXPIRED --> [*]
     REJECTED --> [*]
 ```
 
-`CommitReservation` on an `EXPIRED` reservation answers `ReservationLost`. The saga then tries to reserve again, and refunds if it cannot ([ADR-009](decisions/ADR-009-inventory-reservation.md)).
+`CommitReservation` on an `EXPIRED` reservation takes its stock again, all lines or none. Only if it cannot does it answer `ReservationLost`, and the saga refunds ([ADR-009 amendment](decisions/ADR-009-inventory-reservation.md#amendment-2026-10-03-phase-5-lld)).
 
 ### Payment record (Payments)
 

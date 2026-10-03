@@ -1,6 +1,6 @@
 # ADR-009: Inventory reservation with conditional updates and holds
 
-- **Status:** Accepted (2026-10-02)
+- **Status:** Accepted (2026-10-02), amended by the phase 5 LLD (see the end)
 - **Date:** 2026-10-02
 - **Related:** [Domain model §2](../domain-model.md#2-aggregates-and-invariants), [architecture §11.3 and §16](../architecture.md#16-scalability), [ADR-002](ADR-002-payment-gateway-integration.md), [ADR-007](ADR-007-saga-orchestration.md)
 
@@ -66,3 +66,14 @@ How is stock reserved without overselling under contention, and how long is a ho
 
 - Concurrency tests (phase 5) run N parallel reservations for the last unit and assert exactly one success and no negative availability.
 - Inventory's events (`stock.level_changed`) feed eventually consistent availability hints; checkout never reads them.
+
+## Amendment (2026-10-03, phase 5 LLD)
+
+Two changes, both about expired holds:
+
+- **Reclaiming runs in its own transaction.** A reservation that comes up short rolls back. It then expires the expired holds on its SKUs in a separate transaction, and tries once more. Reclaiming inside the reserving transaction could deadlock: an expired hold can include SKUs that the order doesn't hold, and locking them while holding the order's rows breaks the SKU lock order.
+- **`CommitReservation` takes a lost hold's stock again.** On an `EXPIRED` reservation, it takes every line again, all or nothing, and commits. Only if that fails does it answer `ReservationLost`, and the saga refunds. Reserving again from the saga would have needed a second reservation for the same order id, and a second step.
+
+Inventory also sweeps expired holds every minute (`inventory.expire-holds`), besides reclaiming them on demand. A hold that is swept but not taken by another order is therefore still committed when a late success arrives. `ReservationLost` still needs the stock to have gone to another order.
+
+Details in [LLD §5.4–§5.6](../low-level-design.md#54-reserving).

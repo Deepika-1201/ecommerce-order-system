@@ -12,8 +12,8 @@ Format: Context → Problem → Options considered → Decision → Trade-offs �
 | [ADR-006](ADR-006-kafka.md) | Kafka as the event broker | Accepted |
 | [ADR-007](ADR-007-saga-orchestration.md) | Orchestrated saga for the order lifecycle; payment success is the pivot; choreography for side reactions | Accepted |
 | [ADR-008](ADR-008-transactional-outbox.md) | Transactional outbox with a polling relay, for internal commands, Kafka events and scheduler jobs; per-aggregate ordering by an eligibility rule | Accepted, amended |
-| [ADR-009](ADR-009-inventory-reservation.md) | Conditional updates and reservation records; hold expiry beyond the gateway's success window; flash-sale admission control | Accepted |
-| [ADR-010](ADR-010-idempotency.md) | Layered idempotency: API keys, domain uniqueness, message deduplication, outbound keys, guarded transitions | Accepted |
+| [ADR-009](ADR-009-inventory-reservation.md) | Conditional updates and reservation records; hold expiry beyond the gateway's success window; flash-sale admission control | Accepted, amended |
+| [ADR-010](ADR-010-idempotency.md) | Layered idempotency: API keys, domain uniqueness, message deduplication, outbound keys, guarded transitions | Accepted, extended |
 | [ADR-011](ADR-011-event-versioning.md) | JSON Schema contracts in the repository, versioned event types; registry deferred | Accepted |
 | [ADR-012](ADR-012-no-cache-v1.md) | No cache tier in V1 | Accepted |
 | [ADR-013](ADR-013-technology-stack.md) | Java 25, Spring Boot 4.1, Spring Modulith, Spring for Apache Kafka, grpc-java, Keycloak, OpenTelemetry | Accepted, amended |
@@ -24,3 +24,4 @@ Format: Context → Problem → Options considered → Decision → Trade-offs �
 | [ADR-018](ADR-018-gst-inclusive-prices.md) | GST is extracted per line from GST-inclusive prices, with the 2025 rates and slabs; shipping is taxed at the highest line rate | Accepted |
 | [ADR-019](ADR-019-rounding-and-allocation.md) | Integer paise, half-up rounding per line and tax component, largest-remainder discount allocation; totals are sums | Accepted |
 | [ADR-020](ADR-020-guest-cart-tokens.md) | Guest carts are opened by a secret cart token in a header, stored only as a hash | Accepted |
+| [ADR-021](ADR-021-stock-movements.md) | Every change to on-hand stock writes a movement beside the counters; `on_hand` equals their sum | Accepted |

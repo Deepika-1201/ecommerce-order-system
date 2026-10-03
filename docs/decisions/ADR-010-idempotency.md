@@ -1,6 +1,6 @@
 # ADR-010: Layered idempotency
 
-- **Status:** Accepted (2026-10-02)
+- **Status:** Accepted (2026-10-02), extended in phase 5 (see the end)
 - **Date:** 2026-10-02
 - **Related:** [ADR-002](ADR-002-payment-gateway-integration.md), [ADR-003](ADR-003-job-scheduler-integration.md), [ADR-008](ADR-008-transactional-outbox.md), [failure handling](../failure-handling.md)
 
@@ -53,3 +53,7 @@ Where is duplicate processing prevented, so that no duplicate can create a secon
 
 - No handler may have a side effect outside its transaction except through the outbox or an outbound call with a derived key.
 - The `processed_messages` and inbox tables are kept 30 days, longer than any redelivery window.
+
+## Extension (2026-10-03, phase 5)
+
+`Idempotency-Key` is also required on the warehouse's stock receipts and adjustments (`POST /v1/warehouse/stock/{sku}/receipts` and `…/adjustments`). A retried receipt would otherwise add its units twice, and the phantom units could be sold. The keys are scoped to the operator, like every other key ([LLD §5.9](../low-level-design.md#59-warehouse-api)).

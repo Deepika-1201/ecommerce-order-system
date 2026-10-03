@@ -198,12 +198,14 @@ flowchart TD
     ins -->|already exists| same["Reply with the recorded outcome"]
     ins -->|inserted| loop["For each line in SKU order:<br/>UPDATE stock SET reserved = reserved + qty<br/>WHERE sku and location match<br/>AND on_hand - reserved >= qty"]
     loop -->|every line updated| held["Mark HELD until hold expiry,<br/>reply StockReserved, commit"]
-    loop -->|a line updated 0 rows| reclaim["Reclaim expired holds<br/>on that SKU, retry the line once"]
-    reclaim -->|enough stock| held
-    reclaim -->|still short| rb["Roll back, record REJECTED,<br/>reply StockReservationFailed"]
+    loop -->|a line updated 0 rows| reclaim["Roll back; in a new transaction,<br/>reclaim expired holds on the order's SKUs"]
+    reclaim -->|some reclaimed| retry["Insert and take the lines once more"]
+    retry -->|every line updated| held
+    retry -->|short again| rb["Record REJECTED,<br/>reply StockReservationFailed"]
+    reclaim -->|none| rb
 ```
 
-One local transaction covers every line, so an order holds all its stock or none. A losing transaction waits on the row lock and then re-checks its `WHERE` clause against the committed row, so two orders can never both take the last unit ([ADR-009](decisions/ADR-009-inventory-reservation.md)).
+One local transaction covers every line, so an order holds all its stock or none. A losing transaction waits on the row lock and then re-checks its `WHERE` clause against the committed row, so two orders can never both take the last unit ([ADR-009](decisions/ADR-009-inventory-reservation.md), [LLD §5.4](low-level-design.md#54-reserving)).
 
 ### 11.4 Fulfillment
 

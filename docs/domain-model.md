@@ -78,11 +78,12 @@ Solid arrows are queries or commands; dotted arrows are events. Queries between 
 - `on_hand`: sellable units in the warehouse. `reserved`: units held for orders not yet handed to a carrier. `available = on_hand − reserved`.
 - Invariant: `0 ≤ reserved ≤ on_hand`.
 - Concurrency: atomic conditional update (`… WHERE on_hand - reserved >= :qty`), never read-modify-write ([ADR-009](decisions/ADR-009-inventory-reservation.md)).
+- Every change to `on_hand` writes a stock movement (receipt, adjustment, handover, return), and `on_hand` equals their sum ([ADR-021](decisions/ADR-021-stock-movements.md)).
 
 **Reservation** (aggregate root, one per order)
 
 - Holds: order id (unique), lines (SKU, location, quantity), status, `expires_at`.
-- Status: `HELD` → `COMMITTED` → `FULFILLED`; or `RELEASED`, `EXPIRED`; or `REJECTED` (nothing was held).
+- Status: `HELD` → `COMMITTED` → `FULFILLED` → `RETURNED` (after a return to origin); or `RELEASED`, `EXPIRED`; or `REJECTED` (nothing was held). Committing an `EXPIRED` reservation takes its stock again if it can ([LLD §5.5](low-level-design.md#55-commit-release-handover-and-returns)).
 - Invariants:
   - It covers every line of its order, or none of them (`REJECTED`).
   - Its quantities count in `reserved` exactly while it is `HELD` or `COMMITTED`.
