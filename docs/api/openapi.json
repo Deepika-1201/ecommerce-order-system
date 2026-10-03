@@ -205,6 +205,87 @@
           }
         }
       },
+      "ApplyCoupon" : {
+        "properties" : {
+          "code" : {
+            "maxLength" : 20,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "code" ]
+      },
+      "CartLineResponse" : {
+        "properties" : {
+          "added_unit_price_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "available" : {
+            "type" : "boolean"
+          },
+          "image_url" : {
+            "format" : "uri",
+            "type" : "string"
+          },
+          "line_total_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "option_values" : {
+            "additionalProperties" : {
+              "type" : "string"
+            },
+            "type" : "object"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "quantity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sku" : {
+            "type" : "string"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "unit_price_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "CartResponse" : {
+        "properties" : {
+          "coupon_code" : {
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "expires_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "lines" : {
+            "items" : {
+              "$ref" : "#/components/schemas/CartLineResponse"
+            },
+            "type" : "array"
+          },
+          "subtotal_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "version" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
       "CategoryNode" : {
         "properties" : {
           "children" : {
@@ -477,6 +558,16 @@
         },
         "required" : [ "price_paise", "sku" ]
       },
+      "GuestCartCreated" : {
+        "properties" : {
+          "cart" : {
+            "$ref" : "#/components/schemas/CartResponse"
+          },
+          "cart_token" : {
+            "type" : "string"
+          }
+        }
+      },
       "ImageUpload" : {
         "properties" : {
           "image" : {
@@ -653,6 +744,203 @@
           }
         }
       },
+      "QuoteCart" : {
+        "properties" : {
+          "delivery_state_code" : {
+            "minLength" : 1,
+            "type" : "string"
+          }
+        },
+        "required" : [ "delivery_state_code" ]
+      },
+      "QuoteLineResponse" : {
+        "properties" : {
+          "amount_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "cgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "discount_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gross_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gst_rate_bps" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "igst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "image_url" : {
+            "format" : "uri",
+            "type" : "string"
+          },
+          "option_values" : {
+            "additionalProperties" : {
+              "type" : "string"
+            },
+            "type" : "object"
+          },
+          "previous_unit_price_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "quantity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sku" : {
+            "type" : "string"
+          },
+          "taxable_value_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "unit_price_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "variant_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }
+      },
+      "QuoteResponse" : {
+        "properties" : {
+          "coupon_code" : {
+            "type" : "string"
+          },
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "delivery_state_code" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "lines" : {
+            "items" : {
+              "$ref" : "#/components/schemas/QuoteLineResponse"
+            },
+            "type" : "array"
+          },
+          "shipping" : {
+            "$ref" : "#/components/schemas/QuoteShippingResponse"
+          },
+          "supply_state_code" : {
+            "type" : "string"
+          },
+          "tax_regime" : {
+            "enum" : [ "INTRA_STATE", "INTER_STATE" ],
+            "type" : "string"
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/QuoteTotalsResponse"
+          },
+          "valid_until" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        }
+      },
+      "QuoteShippingResponse" : {
+        "properties" : {
+          "cgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "fee_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gst_rate_bps" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "igst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "taxable_value_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "QuoteTotalsResponse" : {
+        "properties" : {
+          "cgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "discount_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "goods_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "grand_total_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gross_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "igst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "shipping_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "tax_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "taxable_value_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
       "RequestUpload" : {
         "properties" : {
           "alt_text" : {
@@ -672,6 +960,17 @@
           }
         },
         "required" : [ "content_type", "size_bytes" ]
+      },
+      "SetQuantity" : {
+        "properties" : {
+          "quantity" : {
+            "format" : "int32",
+            "maximum" : 10,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        },
+        "required" : [ "quantity" ]
       },
       "StateList" : {
         "properties" : {
@@ -1516,6 +1815,288 @@
         "tags" : [ "Catalog" ]
       }
     },
+    "/v1/guest/cart" : {
+      "get" : {
+        "operationId" : "getGuestCart",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Cart-Token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Read the cart with current prices",
+        "tags" : [ "Guest cart" ]
+      },
+      "post" : {
+        "operationId" : "createGuestCart",
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/GuestCartCreated"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "summary" : "Create a guest cart; its token is in the response, this once",
+        "tags" : [ "Guest cart" ]
+      }
+    },
+    "/v1/guest/cart/coupon" : {
+      "delete" : {
+        "operationId" : "removeGuestCartCoupon",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Cart-Token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Remove the coupon",
+        "tags" : [ "Guest cart" ]
+      },
+      "put" : {
+        "operationId" : "applyGuestCartCoupon",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Cart-Token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ApplyCoupon"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Apply a coupon, replacing any other",
+        "tags" : [ "Guest cart" ]
+      }
+    },
+    "/v1/guest/cart/lines/{sku}" : {
+      "delete" : {
+        "operationId" : "removeGuestCartLine",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Cart-Token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "sku",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Remove a line; removing a line that is not there changes nothing",
+        "tags" : [ "Guest cart" ]
+      },
+      "put" : {
+        "operationId" : "setGuestCartLine",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Cart-Token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "sku",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetQuantity"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Set a line's quantity (1-10), adding the line if needed",
+        "tags" : [ "Guest cart" ]
+      }
+    },
+    "/v1/guest/cart/quotes" : {
+      "post" : {
+        "operationId" : "quoteGuestCart",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Cart-Token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/QuoteCart"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/QuoteResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "summary" : "Quote the cart for a delivery state: prices, discount, GST and shipping, valid 10 minutes",
+        "tags" : [ "Guest cart" ]
+      }
+    },
+    "/v1/guest/cart/quotes/{id}" : {
+      "get" : {
+        "operationId" : "getGuestCartQuote",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Cart-Token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/QuoteResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "summary" : "Read one of this cart's quotes",
+        "tags" : [ "Guest cart" ]
+      }
+    },
     "/v1/me" : {
       "get" : {
         "operationId" : "getProfile",
@@ -1743,6 +2324,271 @@
         "tags" : [ "Me" ]
       }
     },
+    "/v1/me/cart" : {
+      "get" : {
+        "operationId" : "getMyCart",
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Read the cart with current prices; empty at version 0 before the first item",
+        "tags" : [ "My cart" ]
+      }
+    },
+    "/v1/me/cart/coupon" : {
+      "delete" : {
+        "operationId" : "removeMyCartCoupon",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Remove the coupon",
+        "tags" : [ "My cart" ]
+      },
+      "put" : {
+        "operationId" : "applyMyCartCoupon",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ApplyCoupon"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Apply a coupon, replacing any other",
+        "tags" : [ "My cart" ]
+      }
+    },
+    "/v1/me/cart/lines/{sku}" : {
+      "delete" : {
+        "operationId" : "removeMyCartLine",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sku",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Remove a line; removing a line that is not there changes nothing",
+        "tags" : [ "My cart" ]
+      },
+      "put" : {
+        "operationId" : "setMyCartLine",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sku",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "header",
+          "name" : "If-Match",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SetQuantity"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Set a line's quantity (1-10), adding the line if needed",
+        "tags" : [ "My cart" ]
+      }
+    },
+    "/v1/me/cart/merge" : {
+      "post" : {
+        "operationId" : "mergeGuestCart",
+        "parameters" : [ {
+          "in" : "header",
+          "name" : "Cart-Token",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/CartResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Merge the guest cart named by Cart-Token into this cart, after signing in",
+        "tags" : [ "My cart" ]
+      }
+    },
+    "/v1/me/cart/quotes" : {
+      "post" : {
+        "operationId" : "quoteMyCart",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/QuoteCart"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/QuoteResponse"
+                }
+              }
+            },
+            "description" : "Created"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Quote the cart for a delivery state: prices, discount, GST and shipping, valid 10 minutes",
+        "tags" : [ "My cart" ]
+      }
+    },
+    "/v1/me/cart/quotes/{id}" : {
+      "get" : {
+        "operationId" : "getMyCartQuote",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/QuoteResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Read one of the customer's quotes",
+        "tags" : [ "My cart" ]
+      }
+    },
     "/v1/products" : {
       "get" : {
         "operationId" : "browseProducts",
@@ -1853,6 +2699,9 @@
     "description" : "Role admin. Product responses carry the version as ETag.",
     "name" : "Catalog administration"
   }, {
+    "description" : "The signed-in customer's cart and its quotes. Responses carry the version as ETag; If-Match makes a write conditional.",
+    "name" : "My cart"
+  }, {
     "description" : "Role admin. Coupons and their usage.",
     "name" : "Pricing administration"
   }, {
@@ -1861,5 +2710,8 @@
   }, {
     "description" : "The calling customer's profile and addresses. Another customer's address is 404.",
     "name" : "Me"
+  }, {
+    "description" : "No access token: the Cart-Token header is the credential. An unknown token is 404.",
+    "name" : "Guest cart"
   } ]
 }
