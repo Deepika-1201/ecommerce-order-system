@@ -92,6 +92,26 @@
           }
         }
       },
+      "AdjustStock" : {
+        "properties" : {
+          "note" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "quantity_change" : {
+            "format" : "int32",
+            "maximum" : 100000,
+            "minimum" : -100000,
+            "type" : "integer"
+          },
+          "reason" : {
+            "enum" : [ "DAMAGED", "LOST", "FOUND", "COUNT_CORRECTION" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "quantity_change", "reason" ]
+      },
       "AdminImage" : {
         "properties" : {
           "alt_text" : {
@@ -586,6 +606,60 @@
           }
         }
       },
+      "MovementList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/MovementResponse"
+            },
+            "type" : "array"
+          },
+          "next_cursor" : {
+            "type" : "string"
+          }
+        }
+      },
+      "MovementResponse" : {
+        "properties" : {
+          "actor_id" : {
+            "type" : "string"
+          },
+          "created_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "kind" : {
+            "enum" : [ "RECEIPT", "ADJUSTMENT", "HANDOVER", "RETURN" ],
+            "type" : "string"
+          },
+          "note" : {
+            "type" : "string"
+          },
+          "on_hand_after" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "order_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "quantity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "reason" : {
+            "enum" : [ "DAMAGED", "LOST", "FOUND", "COUNT_CORRECTION" ],
+            "type" : "string"
+          },
+          "reference" : {
+            "type" : "string"
+          }
+        }
+      },
       "OptionBody" : {
         "properties" : {
           "name" : {
@@ -941,6 +1015,22 @@
           }
         }
       },
+      "ReceiveStock" : {
+        "properties" : {
+          "quantity" : {
+            "format" : "int32",
+            "maximum" : 100000,
+            "minimum" : 1,
+            "type" : "integer"
+          },
+          "reference" : {
+            "maxLength" : 100,
+            "minLength" : 0,
+            "type" : "string"
+          }
+        },
+        "required" : [ "quantity" ]
+      },
       "RequestUpload" : {
         "properties" : {
           "alt_text" : {
@@ -988,6 +1078,49 @@
             "type" : "string"
           },
           "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "StockLevelResponse" : {
+        "properties" : {
+          "available" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "location_code" : {
+            "type" : "string"
+          },
+          "on_hand" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "reserved" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sku" : {
+            "type" : "string"
+          },
+          "updated_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "version" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "StockList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/StockLevelResponse"
+            },
+            "type" : "array"
+          },
+          "next_cursor" : {
             "type" : "string"
           }
         }
@@ -2689,6 +2822,221 @@
         "summary" : "States and union territories with their GST state codes",
         "tags" : [ "Reference data" ]
       }
+    },
+    "/v1/warehouse/stock" : {
+      "get" : {
+        "operationId" : "listStock",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 20,
+            "format" : "int32",
+            "maximum" : 50,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StockList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "List stock items in SKU order",
+        "tags" : [ "Warehouse" ]
+      }
+    },
+    "/v1/warehouse/stock/{sku}" : {
+      "get" : {
+        "operationId" : "getStock",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sku",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StockLevelResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Read a SKU's stock levels",
+        "tags" : [ "Warehouse" ]
+      }
+    },
+    "/v1/warehouse/stock/{sku}/adjustments" : {
+      "post" : {
+        "operationId" : "adjustStock",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sku",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "description" : "Unique per adjustment; a retry with the same key and body replays the first response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/AdjustStock"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StockLevelResponse"
+                }
+              }
+            },
+            "description" : "The stock levels after the adjustment"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Correct a SKU's count with a reason; never below the units reserved for orders",
+        "tags" : [ "Warehouse" ]
+      }
+    },
+    "/v1/warehouse/stock/{sku}/movements" : {
+      "get" : {
+        "operationId" : "listStockMovements",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sku",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 20,
+            "format" : "int32",
+            "maximum" : 50,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MovementList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "List a SKU's stock movements, newest first",
+        "tags" : [ "Warehouse" ]
+      }
+    },
+    "/v1/warehouse/stock/{sku}/receipts" : {
+      "post" : {
+        "operationId" : "receiveStock",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "sku",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "description" : "Unique per receipt; a retry with the same key and body replays the first response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/ReceiveStock"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StockLevelResponse"
+                }
+              }
+            },
+            "description" : "The stock levels after the receipt"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Receive units (1-100,000); the first receipt of a SKU creates its stock item",
+        "tags" : [ "Warehouse" ]
+      }
     }
   },
   "servers" : [ {
@@ -2710,6 +3058,9 @@
   }, {
     "description" : "The calling customer's profile and addresses. Another customer's address is 404.",
     "name" : "Me"
+  }, {
+    "description" : "Role warehouse. Stock levels, receipts and adjustments, and each SKU's movements. Receipts and adjustments need an Idempotency-Key.",
+    "name" : "Warehouse"
   }, {
     "description" : "No access token: the Cart-Token header is the credential. An unknown token is 404.",
     "name" : "Guest cart"

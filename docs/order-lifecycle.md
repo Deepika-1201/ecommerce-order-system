@@ -49,7 +49,7 @@ stateDiagram-v2
 | PLACED | REJECTED | StockReservationFailed, CouponUnavailable or PaymentCreationFailed | Saga | Release whatever was reserved |
 | PLACED | CANCELLING | CancelOrder | Customer, support | Applied when the current step completes: everything held so far is released |
 | AWAITING_PAYMENT | CONFIRMED | PaymentSucceeded, then ReservationCommitted and the coupon committed | Saga | CreateShipment |
-| AWAITING_PAYMENT | CANCELLED | PaymentFailed or PaymentExpired; or the hold was lost after payment and stock could not be re-reserved | Saga | Release coupon and stock; refund in the lost-hold case |
+| AWAITING_PAYMENT | CANCELLED | PaymentFailed or PaymentExpired; or the hold was lost after payment and its stock could not be taken again | Saga | Release coupon and stock; refund in the lost-hold case |
 | AWAITING_PAYMENT | CANCELLING | CancelOrder | Customer, support | CancelPayment |
 | CONFIRMED | CANCELLING | CancelOrder before handover | Customer, support | CancelShipment |
 | CANCELLING | CANCELLED | Payment cancelled, failed or expired; or the refund was initiated | Saga | Release coupon and stock; refund if money was taken |
@@ -136,7 +136,7 @@ A tracking update is applied only if it is a valid transition from the current s
 |---|---|
 | Cancel vs. payment success | Both are transitions on the same Order, under an optimistic lock: whichever commits first wins and the other re-reads. If the cancel wins, the success arrives in `CANCELLING` and is refunded. If the success wins, the cancel arrives in `CONFIRMED`: the shipment is cancelled, the hold released and the payment refunded. Either way the order ends `CANCELLED` and the money is returned |
 | Cancel vs. handover | The Shipment decides atomically: `CancelShipment` succeeds only before `HANDED_OVER`. If the warehouse wins, the order moves to `SHIPPED` and the cancellation is refused |
-| Payment success vs. hold expiry | A hold outlives the gateway's ability to report success (payment window + 30-minute gateway grace + margin) and is released early on the gateway's terminal events. A success can only find its hold gone if webhooks were lost for the whole hold and another order reclaimed the stock in the minute before the deadline sweep; then the saga re-reserves or refunds ([ADR-009](decisions/ADR-009-inventory-reservation.md)) |
+| Payment success vs. hold expiry | A hold outlives the gateway's ability to report success (payment window + 30-minute gateway grace + margin) and is released early on the gateway's terminal events. A success can only find its hold gone if webhooks were lost for the whole hold and another order reclaimed the stock in the minute before the deadline sweep; then `CommitReservation` takes the stock again if it can, and the saga refunds only if it cannot ([ADR-009](decisions/ADR-009-inventory-reservation.md)) |
 | Duplicate or reordered gateway webhooks | Inbox keyed by gateway event id; a payment record changes only for a newer resource `version` |
 | Two cancel requests | `Idempotency-Key`; a second request with another key finds `CANCELLING` or `CANCELLED` and gets that status back |
 | Two refund requests | One refund per order and reason, with a gateway `Idempotency-Key` derived from both |

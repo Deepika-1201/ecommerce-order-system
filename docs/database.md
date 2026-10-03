@@ -8,7 +8,7 @@
 ## 1. Conventions
 
 - **One schema per module,** owned by that module alone, with its own Flyway history (`db/migration/<module>/`). Foreign keys and joins never cross schemas.
-- **Ids:** UUIDv7 (`Ids.newId()`), except the outbox's identity column. `bigint` for counters and versions.
+- **Ids:** UUIDv7 (`Ids.newId()`), except identity columns where rows must sort in the order they were written: the outbox, the audit log and stock movements. `bigint` for counters and versions.
 - **Money:** `bigint` paise. **Time:** `timestamptz`, written with microsecond precision.
 - **JSON:** `jsonb` for structured data that is queried or validated, `text` for payloads that must stay byte-exact, such as message envelopes.
 - **Status columns** are `text` with a `CHECK` listing the allowed values.
@@ -114,9 +114,9 @@ erDiagram
 | `stock_items` | `sku`, `location_code`, `on_hand`, `reserved`, `version`, `created_at`, `updated_at` | Primary key `(sku, location_code)`; `0 ≤ reserved ≤ on_hand` |
 | `reservations` | `id`, `order_id`, `status`, `expires_at`, `short_sku`, `short_available`, `version`, `created_at`, `updated_at` | `order_id` unique; `expires_at` required while `HELD`; `short_sku` and `short_available` exactly when `REJECTED`; `(expires_at)` partial on `HELD`, for expiry |
 | `reservation_lines` | `reservation_id`, `sku`, `location_code`, `quantity` | Primary key `(reservation_id, sku, location_code)`; `quantity` at least 1 |
-| `stock_movements` | `id`, `sku`, `location_code`, `kind`, `quantity`, `reason`, `note`, `reference`, `order_id`, `on_hand_after`, `actor_id`, `created_at` | References `stock_items`; the sign of `quantity` matches `kind` and `reason`; `reason` exactly for adjustments, `order_id` exactly for handovers and returns; `(order_id, kind, sku, location_code)` unique; `(sku, location_code, id)`, for a SKU's history |
+| `stock_movements` | `id` (identity), `sku`, `location_code`, `kind`, `quantity`, `reason`, `note`, `reference`, `order_id`, `on_hand_after`, `actor_id`, `created_at` | References `stock_items`; the sign of `quantity` matches `kind` and `reason`; `reason` exactly for adjustments, `order_id` exactly for handovers and returns; `(order_id, kind, sku, location_code)` unique; `(sku, location_code, id)`, for a SKU's history; a trigger refuses `UPDATE` and `DELETE` |
 
 - The counters change only by conditional updates ([LLD §5.4](low-level-design.md#54-reserving)).
-- Movements are never updated or deleted, and a stock item's `on_hand` equals the sum of its movements ([ADR-021](decisions/ADR-021-stock-movements.md)).
+- Movements are never updated or deleted, and a stock item's `on_hand` equals the sum of its movements ([ADR-021](decisions/ADR-021-stock-movements.md)). Their ids are taken under the stock row's lock, so a SKU's movements sort in the order they were applied ([LLD §5.8](low-level-design.md#58-stock-movements)).
 - Reservation lines have no foreign key to `stock_items`: a rejected reservation can name a SKU that has no stock item.
 - Reservations are kept, like the orders they belong to.

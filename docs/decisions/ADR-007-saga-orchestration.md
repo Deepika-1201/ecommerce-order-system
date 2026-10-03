@@ -1,6 +1,6 @@
 # ADR-007: Orchestrated saga for the order lifecycle
 
-- **Status:** Accepted (2026-10-02)
+- **Status:** Accepted (2026-10-02); the lost-hold step amended by [ADR-009's amendment](ADR-009-inventory-reservation.md#amendment-2026-10-03-phase-5-lld)
 - **Date:** 2026-10-02
 - **Related:** [Order lifecycle](../order-lifecycle.md), [architecture §13](../architecture.md#13-saga-architecture), [ADR-002](ADR-002-payment-gateway-integration.md), [ADR-008](ADR-008-transactional-outbox.md), [ADR-009](ADR-009-inventory-reservation.md)
 
@@ -34,7 +34,7 @@ How are the participants coordinated so that every order reaches a correct termi
   - *Before it*, steps are compensatable: release stock, release the coupon, cancel the gateway payment.
   - *After it*, steps are retriable: commit the hold, book the shipment. They are retried until they succeed or a person intervenes. A carrier outage never triggers an automatic refund.
 - **Cancellation is a new branch, not a rollback.** It starts from the current state ([architecture §13](../architecture.md#13-saga-architecture)).
-- **Lost hold after payment.** If `CommitReservation` answers `ReservationLost`, the saga reserves again; if that fails, it refunds and cancels (`STOCK_LOST_AFTER_PAYMENT`).
+- **Lost hold after payment.** If `CommitReservation` answers `ReservationLost`, the saga refunds and cancels (`STOCK_LOST_AFTER_PAYMENT`). `CommitReservation` has already tried to take the stock again, so the saga does not reserve again (amended in phase 5, see [ADR-009](ADR-009-inventory-reservation.md#amendment-2026-10-03-phase-5-lld)).
 - **Late replies.** A reply for a step the process has already left is compensated if it holds a resource (a late `StockReserved` for a rejected order is released).
 - **Deadlines.** Every waiting step has one. A recurring sweep resolves overdue processes ([ADR-003 amendment](ADR-003-job-scheduler-integration.md#amendment-2026-10-02-from-the-hld)).
 - **Inspection.** A staff endpoint shows a process's state, its outstanding commands and its history.

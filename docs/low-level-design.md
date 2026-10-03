@@ -1023,10 +1023,9 @@ flowchart TD
     tx -->|every line taken| held["Commit: Held until now + hold"]
     tx -->|a line short| rollback["Roll back"]
     rollback --> reclaim["Own transaction: expire the expired holds<br/>on any of the order's SKUs"]
-    reclaim -->|some expired| retry["Run the transaction once more"]
-    reclaim -->|none| rejected["Record REJECTED: the short SKU<br/>and its available units"]
+    reclaim --> retry["Run the transaction once more"]
     retry -->|every line taken| held
-    retry -->|short again| rejected
+    retry -->|short again| rejected["Record REJECTED: the short SKU<br/>and its available units"]
 ```
 
 1. **Repeats return the original outcome:**
@@ -1044,10 +1043,11 @@ flowchart TD
    ```
 
    If no row is updated, the line is short and the whole transaction rolls back.
-3. **Reclaim, then retry once.** In its own transaction, expire the expired holds that include any of the order's SKUs (§5.6). If any expired, run step 2 once more.
+3. **Reclaim, then retry once.** In its own transaction, expire the expired holds that include any of the order's SKUs (§5.6), then run step 2 once more. It retries even if it expired nothing itself: a sweep, or another order's reclaim, may have just freed the units.
 4. **Record the rejection:** `REJECTED`, with the lines, the first short SKU and its available units. A repeated command then gets the same answer (failure handling S1, S5).
 
 - **The last unit:** under READ COMMITTED, a waiting update re-checks its condition against the committed row, so two orders never both take the last unit (failure handling S7).
+- **A concurrent repeat** waits on the `order_id` index until the first attempt ends, then fails to insert, reads the outcome the first attempt recorded, and returns it.
 - **Reclaiming runs in its own transaction (amends ADR-009).** ADR-009 reclaimed inside the reserving transaction. But an expired hold can include SKUs this order does not hold. Locking those rows while holding this order's rows would break the SKU lock order and could deadlock. After the rollback, the reclaim holds no other locks, so it can lock in order.
 
 ### 5.5 Commit, release, handover and returns
@@ -1078,7 +1078,7 @@ stateDiagram-v2
 | `fulfill` | `COMMITTED` | `FULFILLED` | `on_hand − qty`, `reserved − qty`; a `HANDOVER` movement | `FULFILLED`, `RETURNED`: nothing. Others: an error |
 | `restockReturn` | `FULFILLED` | `RETURNED` | `on_hand + qty`; a `RETURN` movement | `RETURNED`: nothing. Others: an error |
 
-- **Each operation is one transaction,** guarded by the status. `commit` on `REJECTED`, or without a reservation, is an error.
+- **Each operation is one transaction,** guarded by the status, which it reads under the reservation's row lock: a `commit` that waits for a concurrent `release` sees it, and answers `LOST`. `commit` on `REJECTED`, or without a reservation, is an error.
 - **Errors** (`IllegalStateException`) mean a bug in the saga. From phase 6, the message handler fails, and after its retries the message is parked for an operator (§2.4).
 - **`commit` takes a lost hold's stock again (amends ADR-009).** ADR-009 had `commit` answer `ReservationLost` and the saga reserve again. But the order id already has its reservation, and reserving again then committing would be two steps with a gap between them. Taking the stock inside `commit` is one atomic step, after which the saga either continues or refunds.
 
@@ -1087,10 +1087,10 @@ stateDiagram-v2
 - **Sweep:** the recurring task `inventory.expire-holds` runs every minute. In batches of 100, oldest first, it marks `HELD` reservations past `expires_at` as `EXPIRED` and gives their units back.
 - **On demand:** a reservation that comes up short runs the same expiry for its own SKUs, then tries once more (§5.4). A late or stopped sweep therefore never blocks an order (FR-INV5, failure handling S16).
 - **A batch is one transaction:**
-  1. Claim the reservations with `FOR UPDATE SKIP LOCKED`, and mark them `EXPIRED`.
+  1. Claim the reservations, and mark them `EXPIRED`.
   2. Subtract each SKU's total, in SKU order.
-
-  A reservation that is being committed or released at that moment is skipped, and the next run looks at it again.
+- **The sweep skips reservations that are locked** (`FOR UPDATE SKIP LOCKED`). One that is being committed or released at that moment is left alone, and the next run looks at it again.
+- **An on-demand reclaim waits for them instead,** locking in id order. A hold that the sweep or another order's reclaim has claimed but not yet given back then has its units back before the retry. Skipping it would reject an order that the next millisecond could have filled, which is how an expired hold would still block an order.
 - **Whole reservations expire,** never single lines, because a reservation covers all of its order's lines or none.
 - **Cost:** both queries use a partial index on `expires_at` over `HELD` reservations. They cost in proportion to the holds waiting to expire, not to the history.
 - **Phase 6** publishes `ReservationExpired` from the same transaction, for the saga. Ordering's deadline sweep still polls the gateway at hold expiry, and if the payment succeeded, `commit` takes the stock again (§5.5).
@@ -1099,8 +1099,9 @@ stateDiagram-v2
 
 - **Lock order:**
   - A transaction that changes stock locks at most one reservation row first, then stock rows in (SKU, location) order.
-  - An expiry batch locks several reservations, but skips any that are locked, so it never waits for one.
-  - Together, these rule out deadlocks.
+  - An expiry batch locks several reservations first, then stock rows in the same order. The sweep never waits for a reservation; an on-demand reclaim waits for them in id order, holding no stock row while it does.
+  - No transaction waits for a reservation row while it holds a stock row. Together, these rule out deadlocks.
+- **Transactions of their own:** each operation of `StockReservations` runs in transactions apart from any the caller has (`REQUIRES_NEW`). From phase 6, a message handler's transaction never sees the attempts that `reserve` rolls back.
 - **Lock timeout:** each of these transactions starts with `set_config('lock_timeout', '500ms', true)` (ADR-009). A longer wait fails fast with Spring's `CannotAcquireLockException`, which the code raises itself for SQL state `55P03` (§2.8):
   - from phase 6, the saga's message is retried with backoff;
   - the sweep runs again a minute later;
@@ -1121,6 +1122,8 @@ Every change to `on_hand` writes a movement in the same transaction ([ADR-021](d
 - **`on_hand` always equals the sum of its movements.** Tests check this after every step.
 - **`reserved` has no movements:** the `HELD` and `COMMITTED` reservations account for it exactly.
 - **Each movement records** `on_hand` after it and the actor: the staff member's subject, or none for the saga.
+- **Ids are an identity column,** taken under the stock row's lock, so a SKU's movements sort in the order they were applied, whichever instance applied them. UUIDv7 ids, from the clocks of several instances, would not guarantee that.
+- **Movements are never updated or deleted;** a trigger refuses both.
 - **Receipts and adjustments are also audit-logged** (`inventory.receipt`, `inventory.adjustment`).
 
 ### 5.9 Warehouse API
@@ -1137,7 +1140,7 @@ Every change to `on_hand` writes a movement in the same transaction ([ADR-021](d
 - **Receipts and adjustments need an `Idempotency-Key`** (extends [ADR-010](decisions/ADR-010-idempotency.md)). A retried receipt would otherwise add its units twice, and the phantom units could be sold.
 - **Responses:** both answer `200` with the stock levels after the change. A replay returns the same body, with `Idempotent-Replayed: true`.
 - **SKUs** are 3–40 letters, digits and hyphens, upper-cased, as in the catalog. Anything else is `400 invalid_request`.
-- **Limits:** a receipt adds 1–100,000 units. An adjustment changes the count by 1–100,000, either way.
+- **Limits:** a receipt adds 1–100,000 units. An adjustment changes the count by 1–100,000, either way. A `reference` is at most 100 characters, a `note` at most 500.
 - **An adjustment cannot drop `on_hand` below `reserved`,** since those units are promised to orders. Damaged units that are reserved need their orders cancelled first, by support (phase 6).
 
 | Code | Status | When |
@@ -1164,7 +1167,7 @@ erDiagram
 | `reservation_lines` | `sku`, `location_code`, `quantity` |
 | `stock_movements` | `kind`, `quantity`, `reason`, `note`, `reference`, `order_id`, `on_hand_after`, `actor_id` |
 
-- **Defence in depth:** besides the counters' check, `CHECK` constraints match each movement's sign to its kind and reason. A unique index allows one `HANDOVER` and one `RETURN` per order and SKU, so even a broken status guard cannot apply one twice.
+- **Defence in depth:** besides the counters' check, `CHECK` constraints match each movement's sign to its kind and reason. A unique index allows one `HANDOVER` and one `RETURN` per order and SKU, so even a broken status guard cannot apply one twice. A trigger keeps movements append-only.
 - Columns and indexes are in [database.md](database.md#7-inventory-phase-5).
 
 ### 5.11 Configuration
@@ -1191,18 +1194,19 @@ Reservations have no HTTP API: orders drive them from phase 6, and the tests in 
 
 | Test | Proves |
 |---|---|
-| `StockReservationTests` | All or nothing: with one line short, no counter changes, and the rejection names the SKU and its available units. Repeats return the original outcome; different lines for the same order fail. Every transition in §5.5, its repeats, and the errors. `commit` takes a lost hold's stock again, or answers `LOST` |
-| `LastUnitTests` | Eight reservations of the last unit, queued on its row lock and released together: exactly one `Held`. Eight two-line orders over the same two SKUs, half listing them in the opposite order: no deadlock, and each order holds both lines or neither |
-| `HoldExpiryTests` | The sweep expires only holds past their expiry, whole, and gives back every line. Committed reservations never expire. With the sweep stopped, an order that is short only because of an expired hold reclaims it and is held |
-| `StockInvariantTests` | After every step of random sequences of receipts, adjustments, reservations, commits, releases, expiries, handovers and returns, and after concurrent random operations: `0 ≤ reserved ≤ on_hand`, `reserved` equals the lines of `HELD` and `COMMITTED` reservations, and `on_hand` equals the sum of the movements. Adjustments racing reservations never take `on_hand` below `reserved` |
-| `StockLockTimeoutTests` | A reservation that waits longer than the lock timeout fails with `CannotAcquireLockException` and records nothing; run again afterwards, it is held |
-| `WarehouseStockTests` | Receipts create and add; adjustments follow the sign rules and never go below `reserved`. `Idempotency-Key` is required, replays, and gets `422` with another body. Movements are newest first and paginated. Only `warehouse` (`401` and `403` otherwise). Audit entries; a malformed SKU is `400`; `503 stock_busy` |
+| `StockReservationTests` | All or nothing: with one line short, no counter changes, and the rejection names the first short SKU and its available units. Repeats return the original outcome; different lines for the same order fail. Every transition in §5.5, its repeats, and the errors. `commit` takes a lost hold's stock again, reclaiming other expired holds if it must, or answers `LOST`. Operations commit apart from the caller's transaction |
+| `LastUnitTests` | Eight reservations of the last unit, queued on its row lock and released together: exactly one `Held`. Eight two-line orders over the same two SKUs, half listing them in the opposite order: no deadlock, and each order holds both lines or neither. A repeat racing the first attempt gets its outcome. A `commit` waiting for a concurrent release answers `LOST`. An order short of units that another transaction is reclaiming waits for them, and is held |
+| `HoldExpiryTests` | The sweep expires only holds past their expiry, whole, and gives back every line; it works through a backlog in batches, and skips a hold that is locked until its next run. Committed reservations never expire. With the sweep stopped, an order that is short only because of expired holds reclaims them, more than a batch if need be, and is held; holds on other SKUs are left to the sweep |
+| `StockInvariantTests` | After every step of random sequences of receipts, adjustments, reservations, commits, releases, expiries, handovers and returns, and after concurrent random operations: `0 ≤ reserved ≤ on_hand`, `reserved` equals the lines of `HELD` and `COMMITTED` reservations, and `on_hand` equals the sum of the movements. The random operations must reach every status and movement kind. Adjustments racing reservations never take `on_hand` below `reserved` |
+| `StockLockTimeoutTests` | A reservation, a release or a sweep that waits longer than the lock timeout fails with `CannotAcquireLockException` and changes nothing; run again afterwards, it succeeds |
+| `StockSchemaTests` | The schema refuses counters outside `0 ≤ reserved ≤ on_hand`, movements whose sign does not match their kind and reason, a second handover or return of an order's SKU, changes to movements, and holds without an expiry |
+| `WarehouseStockTests` | Receipts create and add; adjustments follow the sign rules and never go below `reserved`. `Idempotency-Key` is required, replays, and gets `422` with another body or SKU. Movements are newest first and paginated. Only `warehouse` (`401` and `403` otherwise). Audit entries; a malformed SKU is `400`; `503 stock_busy`, after which the same key works |
 
 ### 5.14 Exit criteria
 
 | Criterion | Shown by |
 |---|---|
 | N parallel attempts on the last unit give exactly one success | `LastUnitTests` |
-| Availability never goes negative | The `CHECK` constraint; `StockInvariantTests`, including concurrent operations and adjustments racing reservations |
-| An expired hold never blocks an order, even with the sweep stopped (FR-INV5) | `HoldExpiryTests` |
+| Availability never goes negative | The `CHECK` constraint (`StockSchemaTests`); `StockInvariantTests`, including concurrent operations and adjustments racing reservations |
+| An expired hold never blocks an order, even with the sweep stopped (FR-INV5) | `HoldExpiryTests`; `LastUnitTests`, for a hold that another transaction is expiring at that moment |
 | Receipts and adjustments carry a reason and are audit-logged (FR-INV7) | `WarehouseStockTests`, and the demo against Keycloak in CI |
