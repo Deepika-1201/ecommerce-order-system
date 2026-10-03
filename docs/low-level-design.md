@@ -1244,8 +1244,8 @@ Each participant owns its commands and replies: records in its base package. Ord
 | `CreatePayment(order, amount, expiresAt)` | Payments | `PaymentCreated(payment, checkoutUrl)`, `PaymentCreationFailed` |
 | `CancelPayment(order)` | Payments | `PaymentCancelled`, `PaymentCancelRefused` |
 | `CheckPayment(order)` | Payments | The payment's outcome, or `PaymentPending` |
-| `RefundPayment(order, amount, reason)` | Payments | `RefundInitiated(refund, amount)` |
-| `CreateShipment(order)` | Fulfillment | — |
+| `RefundPayment(order, amount, reason)` | Payments | `RefundInitiated(refund, reason, amount)` |
+| `CreateShipment(order, delivery address)` | Fulfillment | — |
 | `CancelShipment(order)` | Fulfillment | `ShipmentCancelled`, `ShipmentCancelRefused` |
 
 Events the saga also consumes: `PaymentSucceeded`, `PaymentFailed`, `PaymentExpired` (Payments); `ShipmentHandedOver`, `ShipmentDelivered`, `ShipmentReturnInitiated`, `ShipmentReturnedToOrigin` (Fulfillment).
@@ -1310,7 +1310,7 @@ One process per order, in its own row: the step it is in, the cancellation reque
 - **The hold** is the payment window (15 minutes) + the gateway's grace (30) + a margin (5), as [ADR-009](decisions/ADR-009-inventory-reservation.md) sets. The payment expires at the hold's expiry minus the grace and the margin, so both count from the same moment (FR-PAY1).
 - **A cancellation requested before a step's reply** (in the first three steps, or in `COMMITTING_STOCK`) turns the reply's way forward into compensation. Whatever is held is released, a created payment is cancelled (`CancelPayment`, `CANCELLING_PAYMENT`), and a successful one refunded. The order ends `CANCELLED`, with the cancellation's reason.
 - **Every other message is ignored.** A message the step does not expect is a duplicate (a redelivery, or the reply to a command sent again), late (the process moved on), or one that a duplicate overtook. It changes nothing and is logged; `processed_messages` still records it. The `DONE` row lists the exceptions: they undo what a late reply did elsewhere, such as a coupon reserved by a command sent again after the order was rejected.
-- **One pure function decides:** `OrderProcess.decide(state, message)` returns the step and status changes, the commands and the deadline. The handlers lock, decide, save and publish in the delivery transaction, and the tests check the table cell by cell without a database.
+- **One object decides, without I/O:** `OrderProcess`, loaded with what it needs from the order, applies a message (`decide`), a cancellation (`requestCancellation`, §6.6) or a deadline (`onDeadline`, §6.7). Each changes the step, the status and the deadline, and leaves the commands to send. The handlers lock, decide, save and publish in the delivery transaction, and the tests check the table cell by cell without a database.
 
 ### 6.6 Cancellation
 
@@ -1329,7 +1329,7 @@ One process per order, in its own row: the step it is in, the cancellation reque
 
 ### 6.7 Deadlines and the sweep
 
-The recurring task `ordering.sweep-deadlines` runs every minute, in process until phase 10. It reads up to 100 processes past their deadline, oldest first, and handles each in its own transaction, under the same locks as a message (the order's row, then the process's), after checking the deadline again. Two sweeps at once therefore never act twice.
+The recurring task `ordering.sweep-deadlines` runs every minute, in process until phase 10. It reads up to 100 processes past their deadline, oldest first, and handles each in its own transaction, under the same locks as a message (the order's row, then the process's), after checking the deadline again. Two sweeps at once therefore never act twice, and an order whose deadline fails is logged and rolled back without holding back the orders after it.
 
 | Step | Deadline | When it passes |
 |---|---|---|
@@ -1357,8 +1357,8 @@ The recurring task `ordering.sweep-deadlines` runs every minute, in process unti
 | Payments | `payments.simulated_payments`: payment id, amount, status (`REQUIRES_PAYMENT`, `PROCESSING`, `SUCCEEDED`, `FAILED`, `EXPIRED`, `CANCELLED`, or `CREATION_REFUSED`), expiry. `payments.simulated_refunds`: one per order and reason | Create: `PaymentCreated`, with `https://checkout.simulator.invalid/pay/{payment}`, or `PaymentCreationFailed` if refused.<br/>Cancel: `PaymentCancelled` before an attempt; `PaymentCancelRefused` during one or after a success; a failure or expiry is answered as such.<br/>Check: the outcome, expiring the payment if its time is up, or `PaymentPending`.<br/>Refund: `RefundInitiated` | `PaymentSimulator`: `refuseCreation`, `startAttempt`, `succeed`, `fail`, `expire` |
 | Fulfillment | `fulfillment.simulated_shipments`: status (`BOOKED`, `HANDED_OVER`, `DELIVERED`, `RETURNING`, `RETURNED`, `CANCELLED`) | Create: booked at once, no reply.<br/>Cancel: `ShipmentCancelled` before the handover, even before the create arrives (which then does nothing); `ShipmentCancelRefused` after | `ShipmentSimulator`: `handOver`, `deliver`, `startReturn`, `completeReturn` |
 
-- **Each command is idempotent per order:** a repeat answers from the record.
-- **The outcome methods publish the events the real modules will** (`PaymentSucceeded`, `ShipmentHandedOver`, …), in their own transaction.
+- **Each command is idempotent per order:** a repeat answers from the record. A refund needs a successful payment; anything else is a bug, and its delivery fails.
+- **The outcome methods publish the events the real modules will** (`PaymentSucceeded`, `ShipmentHandedOver`, …), in their own transaction. `succeed` also works on an expired payment, as the gateway's grace allows (FR-PAY5).
 
 ### 6.9 API
 
@@ -1415,21 +1415,24 @@ erDiagram
 3. The order reaches `AWAITING_PAYMENT`, with a checkout URL; the warehouse sees 1 unit reserved.
 4. Asha cancels: the order is `CANCELLED` (`CUSTOMER`), and the unit is available again.
 5. An order for 3 units is `REJECTED` as `OUT_OF_STOCK`, naming the SKU.
+6. Sunita, a support user in the local realm, reads that order with its customer id; asha gets `403` on support's path.
+7. Asha deletes her address, and the order still shows it: it keeps a snapshot ([ADR-023](decisions/ADR-023-order-address-snapshots.md)).
 
-Payment success and shipping need the simulators, which have no HTTP surface ([ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md)): tests show them until phases 7 and 8.
+The demo follows each order's status, as a client would, since placement and cancellation answer `202`. Payment success and shipping need the simulators, which have no HTTP surface ([ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md)): tests show them until phases 7 and 8.
 
 ### 6.13 Tests
 
 | Test | Proves |
 |---|---|
-| `OrderProcessTests` (unit) | Every cell of §6.5, for every step and message: the step and status changes, the commands and the deadline; and every message a step does not expect changes nothing. The order's status table: every allowed change, and every other refused |
-| `PlacementTests` | `202`, with the order's copies equal to the quote; replays and key reuse; another customer's quote `404`; expired and already ordered quotes `409`; the address rules `422` |
-| `OrderFlowTests` | Through the outbox, with the real Inventory and Pricing: the paths to `DELIVERED` and to `RETURNED_TO_ORIGIN`; rejections for stock, coupon and payment creation; payment failure and expiry; a hold lost after payment, refunded. Stock, coupon counters and refunds are checked at every end |
-| `CancellationTests` | Each row of §6.6 through the API, including a cancellation racing a payment success, both ways, and one racing the handover; support's reason codes and audit entries |
-| `LateReplyTests` | Through the outbox: every reply duplicated, payment events out of order, a late `CouponReserved` after a rejection, a payment that succeeds after cancellation |
-| `DeadlineTests` | Each row of §6.7: commands sent again and their duplicate replies, a payment expired through `CheckPayment`, alerts from the third attempt; two sweeps at once act once |
-| `OrderAccessTests` | Customers see only their own orders (`404` otherwise); support paths for `support` only; listing and pagination |
-| `ParticipantTests` | Inventory's and Pricing's handlers reply as §6.2 says, and repeats answer the same; the simulators' rules |
+| `OrderProcessTests` (unit, 346) | Every cell of §6.5, for every step and message: the step and status changes, the commands and the deadline; and each of the 13 steps against each of the 21 messages, whether it acts or changes nothing. Cancellations from every status, every deadline, and the order's status table: every allowed change, and every other refused |
+| `PlacementTests` (8) | `202`, with the order's copies equal to the quote; replays and key reuse; another customer's quote `404`; expired and already ordered quotes `409`; the address rules `422`; snapshots that outlive the addresses; no stock check at placement |
+| `OrderFlowTests` (8) | Through the outbox, with the real Inventory and Pricing: the paths to `DELIVERED` and to `RETURNED_TO_ORIGIN`; rejections for stock, coupon and payment creation; payment failure and expiry; a hold lost after payment, refunded. Stock, coupon counters and refunds are checked at every end, and the hold and payment windows and the flow's correlation and causation once |
+| `CancellationTests` (14) | Each row of §6.6 through the API, including a cancellation racing a payment success, both ways, and one racing the handover; support's reason codes and audit entries; replays |
+| `LateReplyTests` (7) | Through the outbox: every reply duplicated, midway and at the end; payment and shipment events out of order; a late `CouponReserved` after a rejection; a payment that succeeds after the order was cancelled |
+| `DeadlineTests` (9) | Each row of §6.7: commands sent again and their duplicate replies, a payment expired through `CheckPayment` and a pending one checked again, alerts from the third attempt; the sweep's interval, batch and order; two sweeps at once act once; an order whose deadline fails does not hold back the others |
+| `OrderAccessTests` (4) | Customers see only their own orders (`404` otherwise); support paths for `support` only; listing and pagination |
+| `ParticipantTests` (15) | Inventory's and Pricing's handlers reply as §6.2 says, and repeats answer the same; the simulators' rules |
+| `OrderSchemaTests` (5) | The ordering schema refuses what no decision produces: a reason that does not fit the status, totals that do not add up, a deadline on a finished process, a cancellation without what it needs |
 
 ### 6.14 Exit criteria
 

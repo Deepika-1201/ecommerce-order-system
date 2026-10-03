@@ -12,6 +12,7 @@
 - **Money:** `bigint` paise. **Time:** `timestamptz`, written with microsecond precision.
 - **JSON:** `jsonb` for structured data that is queried or validated, `text` for payloads that must stay byte-exact, such as message envelopes.
 - **Status columns** are `text` with a `CHECK` listing the allowed values.
+- **A `CHECK` that depends on a status is a `CASE` on it,** each branch never `NULL`: a `CHECK` that evaluates to `NULL` passes, so `status = 'REJECTED' AND reason IN (…)` let a rejected order without a reason through until phase 6's schema tests caught it.
 - **Changes during a deployment** are expand/contract: add, backfill, switch, then drop in a later release.
 - **Personal data** (names, emails, phones, addresses) lives only in the `customer` schema.
 
@@ -134,7 +135,7 @@ erDiagram
 |---|---|---|
 | `orders` | `id`, `number`, `customer_id`, `quote_id`, `status`, `reason`, `short_sku`, `tax_regime`, `supply_state_code`, `delivery_state_code`, `coupon_id`, `coupon_code`, the quote's totals with the shipping fee's tax, `delivery_address_id`, `billing_address_id` (snapshot ids), `payment_id`, `checkout_url`, `refund_amount_paise`, `refund_status`, `version`, `placed_at`, `updated_at` | `number` and `quote_id` unique; `reason` only with `REJECTED` and `CANCELLED`, and from that status's list; `short_sku` exactly with `OUT_OF_STOCK`; the totals add up, as a quote's; `(customer_id, id)`, for a customer's orders newest first |
 | `order_lines` | `order_id`, `line_no`, and the quote line's fields | Primary key `(order_id, line_no)`; the amounts add up, as a quote line's |
-| `order_processes` | `order_id`, `step`, `cancel_reason`, `cancel_code`, `cancel_note`, `cancel_requested_at`, `hold_expires_at`, `deadline_at`, `attempts`, `refund_reason`, `version`, `created_at`, `updated_at` | Primary key and foreign key `order_id`; a deadline exactly while the step is not `DONE`; `(deadline_at)` partial on steps other than `DONE`, for the sweep |
+| `order_processes` | `order_id`, `step`, `cancel_reason`, `cancel_code`, `cancel_note`, `cancel_requested_at`, `hold_expires_at`, `deadline_at`, `attempts`, `refund_reason`, `version`, `created_at`, `updated_at` | Primary key and foreign key `order_id`; a deadline exactly while the step is not `DONE`; a cancellation's fields as its requester gives them (support's code, and a note with `OTHER`); `(deadline_at)` partial on steps other than `DONE`, for the sweep |
 
 - The order number comes from the sequence `order_numbers`; it is for display and never grants access.
 - Address snapshots, the quote and the coupon live in other schemas, referenced by id without foreign keys.
