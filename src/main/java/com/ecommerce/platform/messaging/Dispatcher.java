@@ -70,7 +70,11 @@ class Dispatcher implements SmartLifecycle {
 
     /** Delivers the next eligible message, if any; returns whether there was one. */
     boolean deliverNext() {
-        String[] destinations = handlers.handlerDestinations();
+        return deliverNext(handlers.handlerDestinations());
+    }
+
+    /** As {@link #deliverNext()}, among these destinations only. */
+    boolean deliverNext(String[] destinations) {
         if (destinations.length == 0) {
             return false;
         }

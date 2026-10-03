@@ -677,6 +677,328 @@
         },
         "required" : [ "name", "values" ]
       },
+      "OrderAddressResponse" : {
+        "properties" : {
+          "city" : {
+            "type" : "string"
+          },
+          "landmark" : {
+            "type" : "string"
+          },
+          "line1" : {
+            "type" : "string"
+          },
+          "line2" : {
+            "type" : "string"
+          },
+          "phone" : {
+            "type" : "string"
+          },
+          "pin_code" : {
+            "type" : "string"
+          },
+          "recipient_name" : {
+            "type" : "string"
+          },
+          "state_code" : {
+            "type" : "string"
+          },
+          "state_name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "OrderLineResponse" : {
+        "properties" : {
+          "amount_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "cgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "discount_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gross_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gst_rate_bps" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "igst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "image_url" : {
+            "format" : "uri",
+            "type" : "string"
+          },
+          "option_values" : {
+            "additionalProperties" : {
+              "type" : "string"
+            },
+            "type" : "object"
+          },
+          "product_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "quantity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sku" : {
+            "type" : "string"
+          },
+          "taxable_value_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "unit_price_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "variant_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }
+      },
+      "OrderList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/OrderSummaryResponse"
+            },
+            "type" : "array"
+          },
+          "next_cursor" : {
+            "type" : "string"
+          }
+        }
+      },
+      "OrderRefundResponse" : {
+        "properties" : {
+          "amount_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "status" : {
+            "enum" : [ "REQUESTED", "INITIATED" ],
+            "type" : "string"
+          }
+        }
+      },
+      "OrderResponse" : {
+        "properties" : {
+          "billing_address" : {
+            "$ref" : "#/components/schemas/OrderAddressResponse"
+          },
+          "checkout_url" : {
+            "format" : "uri",
+            "type" : "string"
+          },
+          "coupon_code" : {
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "customer_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "delivery_address" : {
+            "$ref" : "#/components/schemas/OrderAddressResponse"
+          },
+          "delivery_state_code" : {
+            "type" : "string"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "lines" : {
+            "items" : {
+              "$ref" : "#/components/schemas/OrderLineResponse"
+            },
+            "type" : "array"
+          },
+          "number" : {
+            "type" : "string"
+          },
+          "placed_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "reason" : {
+            "enum" : [ "OUT_OF_STOCK", "COUPON_UNAVAILABLE", "PAYMENTS_UNAVAILABLE", "CUSTOMER", "SUPPORT", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "STOCK_LOST_AFTER_PAYMENT" ],
+            "type" : "string"
+          },
+          "refund" : {
+            "$ref" : "#/components/schemas/OrderRefundResponse"
+          },
+          "shipping" : {
+            "$ref" : "#/components/schemas/OrderShippingResponse"
+          },
+          "status" : {
+            "enum" : [ "PLACED", "AWAITING_PAYMENT", "CONFIRMED", "SHIPPED", "DELIVERED", "DELIVERY_FAILED", "RETURNED_TO_ORIGIN", "CANCELLING", "CANCELLED", "REJECTED" ],
+            "type" : "string"
+          },
+          "supply_state_code" : {
+            "type" : "string"
+          },
+          "tax_regime" : {
+            "enum" : [ "INTRA_STATE", "INTER_STATE" ],
+            "type" : "string"
+          },
+          "totals" : {
+            "$ref" : "#/components/schemas/OrderTotalsResponse"
+          },
+          "unavailable_sku" : {
+            "type" : "string"
+          },
+          "updated_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          }
+        }
+      },
+      "OrderShippingResponse" : {
+        "properties" : {
+          "cgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "fee_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gst_rate_bps" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "igst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "taxable_value_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "OrderSummaryResponse" : {
+        "properties" : {
+          "currency" : {
+            "type" : "string"
+          },
+          "grand_total_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "item_count" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "number" : {
+            "type" : "string"
+          },
+          "placed_at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "reason" : {
+            "enum" : [ "OUT_OF_STOCK", "COUPON_UNAVAILABLE", "PAYMENTS_UNAVAILABLE", "CUSTOMER", "SUPPORT", "PAYMENT_FAILED", "PAYMENT_EXPIRED", "STOCK_LOST_AFTER_PAYMENT" ],
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "PLACED", "AWAITING_PAYMENT", "CONFIRMED", "SHIPPED", "DELIVERED", "DELIVERY_FAILED", "RETURNED_TO_ORIGIN", "CANCELLING", "CANCELLED", "REJECTED" ],
+            "type" : "string"
+          }
+        }
+      },
+      "OrderTotalsResponse" : {
+        "properties" : {
+          "cgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "discount_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "goods_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "grand_total_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "gross_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "igst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "sgst_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "shipping_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "tax_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          },
+          "taxable_value_paise" : {
+            "format" : "int64",
+            "type" : "integer"
+          }
+        }
+      },
+      "PlaceOrder" : {
+        "properties" : {
+          "billing_address_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "delivery_address_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "quote_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        },
+        "required" : [ "delivery_address_id", "quote_id" ]
+      },
       "ProductList" : {
         "properties" : {
           "items" : {
@@ -1124,6 +1446,20 @@
             "type" : "string"
           }
         }
+      },
+      "SupportCancellation" : {
+        "properties" : {
+          "note" : {
+            "maxLength" : 500,
+            "minLength" : 0,
+            "type" : "string"
+          },
+          "reason_code" : {
+            "enum" : [ "CUSTOMER_REQUEST", "SUSPECTED_FRAUD", "ITEM_UNAVAILABLE", "PRICING_ERROR", "OTHER" ],
+            "type" : "string"
+          }
+        },
+        "required" : [ "reason_code" ]
       },
       "UpdateCategory" : {
         "properties" : {
@@ -2722,6 +3058,156 @@
         "tags" : [ "My cart" ]
       }
     },
+    "/v1/me/orders" : {
+      "get" : {
+        "operationId" : "listMyOrders",
+        "parameters" : [ {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 20,
+            "format" : "int32",
+            "maximum" : 50,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OrderList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "List the caller's orders, newest first",
+        "tags" : [ "My orders" ]
+      },
+      "post" : {
+        "operationId" : "placeOrder",
+        "parameters" : [ {
+          "description" : "Unique per order; a retry with the same key and body replays the first response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PlaceOrder"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OrderResponse"
+                }
+              }
+            },
+            "description" : "The order, PLACED"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Place an order from a valid quote, at its prices; stock is reserved next, then payment is set up",
+        "tags" : [ "My orders" ]
+      }
+    },
+    "/v1/me/orders/{id}" : {
+      "get" : {
+        "operationId" : "getMyOrder",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OrderResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Read one of the caller's orders: status and reason, lines, totals, addresses, the checkout URL while awaiting payment, and any refund",
+        "tags" : [ "My orders" ]
+      }
+    },
+    "/v1/me/orders/{id}/cancel" : {
+      "post" : {
+        "operationId" : "cancelMyOrder",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "description" : "Unique per cancellation request; a retry with the same key replays the first response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OrderResponse"
+                }
+              }
+            },
+            "description" : "The order, CANCELLING or already CANCELLED"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Cancel an order before it ships; a paid order is refunded",
+        "tags" : [ "My orders" ]
+      }
+    },
     "/v1/products" : {
       "get" : {
         "operationId" : "browseProducts",
@@ -2821,6 +3307,86 @@
         },
         "summary" : "States and union territories with their GST state codes",
         "tags" : [ "Reference data" ]
+      }
+    },
+    "/v1/support/orders/{id}" : {
+      "get" : {
+        "operationId" : "getOrderForSupport",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OrderResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Read any order, with its customer id",
+        "tags" : [ "Support" ]
+      }
+    },
+    "/v1/support/orders/{id}/cancel" : {
+      "post" : {
+        "operationId" : "cancelOrderForSupport",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        }, {
+          "description" : "Unique per cancellation request; a retry with the same key and body replays the first response",
+          "in" : "header",
+          "name" : "Idempotency-Key",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/SupportCancellation"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OrderResponse"
+                }
+              }
+            },
+            "description" : "The order, CANCELLING or already CANCELLED"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Cancel an order before it ships, with a reason code; OTHER needs a note",
+        "tags" : [ "Support" ]
       }
     },
     "/v1/warehouse/stock" : {
@@ -3047,11 +3613,17 @@
     "description" : "Role admin. Product responses carry the version as ETag.",
     "name" : "Catalog administration"
   }, {
+    "description" : "Role support. Any order, as its customer sees it plus the customer id; cancellations take a reason code and an Idempotency-Key, and are audit-logged.",
+    "name" : "Support"
+  }, {
     "description" : "The signed-in customer's cart and its quotes. Responses carry the version as ETag; If-Match makes a write conditional.",
     "name" : "My cart"
   }, {
     "description" : "Role admin. Coupons and their usage.",
     "name" : "Pricing administration"
+  }, {
+    "description" : "The signed-in customer's orders. Placing and cancelling need an Idempotency-Key; both answer 202 and the order moves on by itself, so follow its status.",
+    "name" : "My orders"
   }, {
     "description" : "No token needed. Cacheable for 30 s, with ETags.",
     "name" : "Catalog"

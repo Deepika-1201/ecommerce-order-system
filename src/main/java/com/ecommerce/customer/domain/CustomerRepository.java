@@ -1,5 +1,6 @@
 package com.ecommerce.customer.domain;
 
+import com.ecommerce.customer.AddressSnapshot;
 import com.ecommerce.shared.IndianState;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -20,6 +21,10 @@ class CustomerRepository {
 
     private static final String ADDRESS_COLUMNS = """
             id, recipient_name, phone, line1, line2, landmark, city, state_code, pin_code, is_default
+            """;
+
+    private static final String SNAPSHOT_COLUMNS = """
+            id, recipient_name, phone, line1, line2, landmark, city, state_code, pin_code
             """;
 
     private final JdbcClient jdbc;
@@ -175,6 +180,31 @@ class CustomerRepository {
                 .optional();
     }
 
+    /** Copies the customer's address into a new snapshot; empty if the customer has no such address. */
+    Optional<AddressSnapshot> insertSnapshot(UUID id, UUID customerId, UUID addressId) {
+        return jdbc.sql("""
+                        INSERT INTO customer.address_snapshots (id, customer_id, recipient_name, phone, line1, line2,
+                                                                landmark, city, state_code, pin_code, created_at)
+                        SELECT :id, customer_id, recipient_name, phone, line1, line2, landmark, city, state_code,
+                               pin_code, :now
+                        FROM customer.addresses WHERE customer_id = :customerId AND id = :addressId
+                        RETURNING
+                        """ + SNAPSHOT_COLUMNS)
+                .param("id", id)
+                .param("now", now())
+                .param("customerId", customerId)
+                .param("addressId", addressId)
+                .query(CustomerRepository::snapshot)
+                .optional();
+    }
+
+    Optional<AddressSnapshot> snapshot(UUID id) {
+        return jdbc.sql("SELECT " + SNAPSHOT_COLUMNS + " FROM customer.address_snapshots WHERE id = :id")
+                .param("id", id)
+                .query(CustomerRepository::snapshot)
+                .optional();
+    }
+
     private OffsetDateTime now() {
         return OffsetDateTime.now(clock);
     }
@@ -196,5 +226,18 @@ class CustomerRepository {
                 IndianState.fromCode(row.getString("state_code")).orElseThrow(),
                 row.getString("pin_code"),
                 row.getBoolean("is_default"));
+    }
+
+    private static AddressSnapshot snapshot(ResultSet row, int rowNumber) throws SQLException {
+        return new AddressSnapshot(
+                row.getObject("id", UUID.class),
+                row.getString("recipient_name"),
+                row.getString("phone"),
+                row.getString("line1"),
+                row.getString("line2"),
+                row.getString("landmark"),
+                row.getString("city"),
+                IndianState.fromCode(row.getString("state_code")).orElseThrow(),
+                row.getString("pin_code"));
     }
 }

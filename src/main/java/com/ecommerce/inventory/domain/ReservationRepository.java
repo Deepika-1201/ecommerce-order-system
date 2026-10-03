@@ -33,6 +33,15 @@ class ReservationRepository {
         return header(orderId, " FOR UPDATE").map(this::withLines);
     }
 
+    /** The reservation's version, which orders its replies to the saga (LLD §6.2); 0 if the order has none. */
+    long version(UUID orderId) {
+        return jdbc.sql("SELECT version FROM inventory.reservations WHERE order_id = :orderId")
+                .param("orderId", orderId)
+                .query(Long.class)
+                .optional()
+                .orElse(0L);
+    }
+
     /**
      * Inserts the reservation with its lines. {@code order_id} is unique: while another transaction has inserted the
      * same order, this waits for it to end, then fails with {@code DuplicateKeyException} if it committed.

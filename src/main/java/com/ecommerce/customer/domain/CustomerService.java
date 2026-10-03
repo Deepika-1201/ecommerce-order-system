@@ -1,11 +1,13 @@
 package com.ecommerce.customer.domain;
 
+import com.ecommerce.customer.AddressSnapshot;
 import com.ecommerce.customer.Customers;
 import com.ecommerce.platform.ApiException;
 import com.ecommerce.platform.Caller;
 import com.ecommerce.shared.Ids;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -30,6 +32,18 @@ public class CustomerService implements Customers {
     @Transactional
     public UUID idOf(Caller caller) {
         return resolve(caller, false).id();
+    }
+
+    @Override
+    @Transactional
+    public Optional<AddressSnapshot> snapshotAddress(UUID customerId, UUID addressId) {
+        return customers.insertSnapshot(Ids.newId(), customerId, addressId);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<AddressSnapshot> addressSnapshot(UUID snapshotId) {
+        return customers.snapshot(snapshotId);
     }
 
     @Transactional

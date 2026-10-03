@@ -1,0 +1,163 @@
+package com.ecommerce.ordering.domain;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.ecommerce.ordering.OrderingTest;
+import com.ecommerce.support.Eventually;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import javax.sql.DataSource;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
+
+/** The deadline sweep (LLD §6.7): it only ever asks again or alerts, and two sweeps at once act once. */
+@ExtendWith(OutputCaptureExtension.class)
+class DeadlineTests extends OrderingTest {
+
+    @Autowired
+    private DeadlineSweep sweep;
+
+    @Autowired
+    private DataSource dataSource;
+
+    @Test
+    void aCommandSentAgainIsAnsweredTheSameAndItsSecondReplyIsIgnored() {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID orderId = placeOrder(asha, sku, 2, null);
+
+        deadlinePasses(orderId);
+
+        assertThat(pending(orderId)).containsExactly("inventory.reserve-stock", "inventory.reserve-stock");
+        assertThat(attempts(orderId)).isEqualTo(2);
+        deliver();
+        assertThat(status(orderId)).isEqualTo("AWAITING_PAYMENT");
+        assertThat(processed("ordering.stock-reserved")).as("both replies handled, the second ignored").isEqualTo(2);
+        assertThat(jdbc.sql("SELECT count(*) FROM inventory.reservations").query(Integer.class).single()).isOne();
+        assertStock(sku, 5, 2);
+    }
+
+    @Test
+    void aPaymentLeftUnpaidIsExpiredWhenTheHoldExpires() {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID orderId = awaitingPayment(sku, 1);
+        jdbc.sql("UPDATE payments.simulated_payments SET expires_at = :past WHERE order_id = :id")
+                .param("past", OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1))
+                .param("id", orderId)
+                .update();
+
+        deadlinePasses(orderId);
+
+        assertThat(pending(orderId)).containsExactly("payments.check-payment");
+        deliver();
+        assertThat(payment(orderId)).isEqualTo("EXPIRED");
+        assertThat(status(orderId)).isEqualTo("CANCELLED");
+        assertThat(reason(orderId)).isEqualTo("PAYMENT_EXPIRED");
+        assertStock(sku, 5, 0);
+    }
+
+    @Test
+    void aPaymentBeingPaidWhenTheHoldExpiresIsCheckedAgainInFiveMinutes() {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID orderId = awaitingPayment(sku, 1);
+        payments.startAttempt(orderId);
+
+        deadlinePasses(orderId);
+        deliver();
+
+        assertThat(step(orderId)).isEqualTo("AWAITING_PAYMENT");
+        assertThat(processed("ordering.payment-pending")).isOne();
+        assertThat(Duration.between(Instant.now(), deadline(orderId)))
+                .isBetween(Duration.ofMinutes(4), OrderProcess.RECHECK_INTERVAL);
+    }
+
+    @Test
+    void aStepAlertsFromItsThirdAttempt(CapturedOutput output) {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID orderId = placeOrder(asha, sku, 1, null);
+        String alert = "order_process_overdue: order " + orderId + " in step RESERVING_STOCK";
+
+        deadlinePasses(orderId);
+        assertThat(output).doesNotContain(alert);
+
+        deadlinePasses(orderId);
+        assertThat(attempts(orderId)).isEqualTo(3);
+        assertThat(output).contains(alert + " after 3 attempts");
+        assertThat(pending(orderId)).hasSize(3);
+    }
+
+    @Test
+    void aMissingHandoverAlertsAndWaitsAnotherDay(CapturedOutput output) {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID orderId = confirmed(sku, 1, null);
+
+        deadlinePasses(orderId);
+
+        assertThat(output).contains("order_process_overdue: order " + orderId + " in step AWAITING_HANDOVER after 1 "
+                + "attempts");
+        assertThat(pending(orderId)).isEmpty();
+        assertThat(Duration.between(Instant.now(), deadline(orderId)))
+                .isBetween(Duration.ofHours(23), OrderProcess.HANDOVER_TIMEOUT);
+        assertThat(status(orderId)).isEqualTo("CONFIRMED");
+    }
+
+    @Test
+    void twoSweepsAtOnceActOnce() throws Exception {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID orderId = placeOrder(asha, sku, 1, null);
+        jdbc.sql("UPDATE ordering.order_processes SET deadline_at = :past WHERE order_id = :id")
+                .param("past", OffsetDateTime.now(ZoneOffset.UTC).minusSeconds(1))
+                .param("id", orderId)
+                .update();
+
+        try (Connection gate = dataSource.getConnection();
+                ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            gate.setAutoCommit(false);
+            try (PreparedStatement lock = gate.prepareStatement(
+                    "SELECT 1 FROM ordering.orders WHERE id = ? FOR UPDATE")) {
+                lock.setObject(1, orderId);
+                lock.executeQuery().close();
+            }
+            Future<?> first = executor.submit(() -> sweep.sweep(null));
+            Future<?> second = executor.submit(() -> sweep.sweep(null));
+            try {
+                Eventually.await(Duration.ofSeconds(10), "both sweeps waiting for the order", () -> jdbc.sql("""
+                                SELECT count(*) FROM pg_stat_activity
+                                WHERE datname = current_database() AND wait_event_type = 'Lock'
+                                """).query(Integer.class).single() >= 2);
+            } finally {
+                gate.commit();
+            }
+            first.get(10, TimeUnit.SECONDS);
+            second.get(10, TimeUnit.SECONDS);
+        }
+
+        assertThat(attempts(orderId)).isEqualTo(2);
+        assertThat(pending(orderId)).containsExactly("inventory.reserve-stock", "inventory.reserve-stock");
+    }
+
+    private int processed(String consumer) {
+        return jdbc.sql("SELECT count(*) FROM platform.processed_messages WHERE consumer = :consumer")
+                .param("consumer", consumer)
+                .query(Integer.class)
+                .single();
+    }
+
+    private Instant deadline(UUID orderId) {
+        return jdbc.sql("SELECT deadline_at FROM ordering.order_processes WHERE order_id = :id")
+                .param("id", orderId)
+                .query((row, n) -> row.getObject("deadline_at", OffsetDateTime.class).toInstant())
+                .single();
+    }
+}

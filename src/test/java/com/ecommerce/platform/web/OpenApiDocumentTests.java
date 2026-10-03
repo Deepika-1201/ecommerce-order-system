@@ -3,12 +3,16 @@ package com.ecommerce.platform.web;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecommerce.support.IntegrationTest;
+import com.tngtech.archunit.core.domain.JavaClass;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
+import com.tngtech.archunit.core.importer.ImportOption;
 import java.io.IOException;
 import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.SerializationFeature;
@@ -59,5 +63,19 @@ class OpenApiDocumentTests extends IntegrationTest {
                 .toList();
 
         assertThat(ids).doesNotHaveDuplicates().noneMatch(id -> id.matches(".*_\\d+"));
+    }
+
+    /** springdoc names a schema after its class's simple name: two web records with one name would share a schema. */
+    @Test
+    void requestAndResponseRecordsHaveNamesOfTheirOwn() {
+        Map<String, List<String>> byName = new ClassFileImporter()
+                .withImportOption(ImportOption.Predefined.DO_NOT_INCLUDE_TESTS)
+                .importPackages("com.ecommerce")
+                .stream()
+                .filter(type -> type.isRecord() && type.getPackageName().endsWith(".web"))
+                .collect(Collectors.groupingBy(JavaClass::getSimpleName,
+                        Collectors.mapping(JavaClass::getName, Collectors.toList())));
+
+        assertThat(byName).isNotEmpty().allSatisfy((name, records) -> assertThat(records).as(name).hasSize(1));
     }
 }
