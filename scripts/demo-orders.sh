@@ -8,6 +8,7 @@ set -euo pipefail
 source "$(dirname "$0")/demo-lib.sh"
 
 RUN=$(date +%s)   # suffix for the slug, the SKU and the keys, so every run creates its own
+# The keys also name this demo: in CI the demos run within the same second, and meera's receipt key would collide.
 SKU="KETTLE-$RUN"
 STOCK="/v1/warehouse/stock/$SKU"
 
@@ -47,7 +48,7 @@ PRODUCT=$(api 201 POST /v1/admin/catalog/products "$ADMIN" "$BODY" | json id)
 BODY="{\"sku\": \"$SKU\", \"option_values\": {}, \"price_paise\": 149900}"
 api 201 POST "/v1/admin/catalog/products/$PRODUCT/variants" "$ADMIN" "$BODY" > /dev/null
 api 200 POST "/v1/admin/catalog/products/$PRODUCT/activate" "$ADMIN" "" > /dev/null
-LEVELS=$(api 200 POST "$STOCK/receipts" "$MEERA" '{"quantity": 2}' "Idempotency-Key: receipt-$RUN")
+LEVELS=$(api 200 POST "$STOCK/receipts" "$MEERA" '{"quantity": 2}' "Idempotency-Key: orders-receipt-$RUN")
 check "$LEVELS" on_hand=2 reserved=0
 echo "2 on hand"
 
@@ -64,15 +65,15 @@ BODY='{"recipient_name": "Asha Rao", "phone": "98765 43210", "line1": "12, 4th C
 ADDRESS=$(api 201 POST /v1/me/addresses "$ASHA" "$BODY" | json id)
 quote_for 1
 PLACE="{\"quote_id\": \"$QUOTE\", \"delivery_address_id\": \"$ADDRESS\"}"
-PLACED=$(api 202 POST /v1/me/orders "$ASHA" "$PLACE" "Idempotency-Key: order-$RUN")
+PLACED=$(api 202 POST /v1/me/orders "$ASHA" "$PLACE" "Idempotency-Key: orders-place-$RUN")
 ORDER=$(json id <<< "$PLACED")
 check "$PLACED" status=PLACED "lines.$SKU.quantity=1" totals.grand_total_paise=149900 delivery_address.city=Bengaluru
 echo "order $(json number <<< "$PLACED"), PLACED: Rs 1,499, GST included"
 
 step "asha: the same request with the same key returns the same order; ravi cannot see it"
-REPLAYED=$(api 202 POST /v1/me/orders "$ASHA" "$PLACE" "Idempotency-Key: order-$RUN")
+REPLAYED=$(api 202 POST /v1/me/orders "$ASHA" "$PLACE" "Idempotency-Key: orders-place-$RUN")
 check "$REPLAYED" "id=$ORDER"
-expect_code 409 quote_already_ordered POST /v1/me/orders "$ASHA" "$PLACE" "Idempotency-Key: again-$RUN"
+expect_code 409 quote_already_ordered POST /v1/me/orders "$ASHA" "$PLACE" "Idempotency-Key: orders-again-$RUN"
 expect_code 404 not_found GET "/v1/me/orders/$ORDER" "$RAVI" ""
 echo "one order per quote; another customer's order is not found"
 
@@ -84,7 +85,7 @@ check "$LEVELS" on_hand=2 reserved=1 available=1
 echo "meera sees 1 unit reserved"
 
 step "asha cancels: the payment is cancelled and the unit is available again"
-CANCELLING=$(api 202 POST "/v1/me/orders/$ORDER/cancel" "$ASHA" "" "Idempotency-Key: cancel-$RUN")
+CANCELLING=$(api 202 POST "/v1/me/orders/$ORDER/cancel" "$ASHA" "" "Idempotency-Key: orders-cancel-$RUN")
 echo "accepted: $(json status <<< "$CANCELLING")"
 await_status "$ORDER" CANCELLED
 check "$ORDER_BODY" reason=CUSTOMER
@@ -95,7 +96,7 @@ echo "CANCELLED (CUSTOMER); 2 available"
 step "asha orders 3 kettles: there are 2, so the order is rejected, naming the SKU"
 quote_for 3
 BODY="{\"quote_id\": \"$QUOTE\", \"delivery_address_id\": \"$ADDRESS\"}"
-REJECTED=$(api 202 POST /v1/me/orders "$ASHA" "$BODY" "Idempotency-Key: too-many-$RUN" | json id)
+REJECTED=$(api 202 POST /v1/me/orders "$ASHA" "$BODY" "Idempotency-Key: orders-too-many-$RUN" | json id)
 await_status "$REJECTED" REJECTED
 check "$ORDER_BODY" reason=OUT_OF_STOCK "unavailable_sku=$SKU"
 LEVELS=$(api 200 GET "$STOCK" "$MEERA" "")
