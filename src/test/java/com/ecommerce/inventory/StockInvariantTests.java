@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -58,6 +59,7 @@ class StockInvariantTests extends InventoryTest {
     void theInvariantsHoldAfterConcurrentRandomOperations() throws Exception {
         RECEIVED.forEach(sku -> receive(sku, 20));
         List<UUID> orders = new CopyOnWriteArrayList<>();
+        Set<String> visited = ConcurrentHashMap.newKeySet();
         List<String> unexpected = Collections.synchronizedList(new ArrayList<>());
         List<Future<?>> workers = new ArrayList<>();
         try (ExecutorService executor = Executors.newFixedThreadPool(6)) {
@@ -72,6 +74,7 @@ class StockInvariantTests extends InventoryTest {
                         } catch (RuntimeException e) {
                             unexpected.add(e.toString());
                         }
+                        visited.addAll(statuses());
                     }
                 }));
             }
@@ -83,7 +86,8 @@ class StockInvariantTests extends InventoryTest {
         assertThat(unexpected).isEmpty();
         sweep();
         assertInvariants();
-        assertEveryStatusAndMovementKindOccurred(statuses());
+        visited.addAll(statuses());
+        assertEveryStatusAndMovementKindOccurred(visited);
     }
 
     @Test

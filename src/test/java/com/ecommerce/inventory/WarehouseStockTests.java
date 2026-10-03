@@ -72,7 +72,9 @@ class WarehouseStockTests extends InventoryTest {
         assertCode(adjust("INK-1", "k-2", 1, "DAMAGED"), 400, "invalid_adjustment");
         assertCode(adjust("INK-1", "k-3", 1, "LOST"), 400, "invalid_adjustment");
         assertCode(adjust("INK-1", "k-4", -1, "FOUND"), 400, "invalid_adjustment");
-        assertCode(adjust("INK-1", "k-5", 0, "COUNT_CORRECTION"), 400, "invalid_adjustment");
+        for (String reason : List.of("DAMAGED", "LOST", "FOUND", "COUNT_CORRECTION")) {
+            assertCode(adjust("INK-1", "k-zero-" + reason, 0, reason), 400, "invalid_adjustment");
+        }
         assertThat(ok(adjust("INK-1", "k-6", -2, "DAMAGED")).get("on_hand").asLong()).isEqualTo(8);
         assertThat(ok(adjust("INK-1", "k-7", -1, "LOST")).get("on_hand").asLong()).isEqualTo(7);
         assertThat(ok(adjust("INK-1", "k-8", 3, "FOUND")).get("on_hand").asLong()).isEqualTo(10);
@@ -146,6 +148,7 @@ class WarehouseStockTests extends InventoryTest {
         for (String sku : List.of("PEN-1", "INK-1", "CAP-1")) {
             ok(post("/" + sku + "/receipts", "k-" + sku, "{\"quantity\": 1}"));
         }
+        ok(post("/PEN-1/receipts", "k-PEN-1-again", "{\"quantity\": 1}"));
 
         JsonNode first = ok(get("?limit=2"));
         JsonNode second = ok(get("?limit=2&cursor=" + first.get("next_cursor").asString()));
@@ -155,6 +158,9 @@ class WarehouseStockTests extends InventoryTest {
         assertThat(second.get("items")).extracting(item -> item.get("sku").asString()).containsExactly("PEN-1");
         assertThat(second.has("next_cursor")).isFalse();
         assertCode(get("?cursor=" + first.get("next_cursor").asString().substring(1)), 400, "invalid_cursor");
+        String movementCursor = ok(get("/PEN-1/movements?limit=1")).get("next_cursor").asString();
+        assertCode(get("?cursor=" + movementCursor), 400, "invalid_cursor");
+        assertCode(get("/PEN-1/movements?cursor=" + first.get("next_cursor").asString()), 400, "invalid_cursor");
     }
 
     @Test

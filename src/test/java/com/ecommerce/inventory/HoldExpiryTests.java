@@ -36,6 +36,8 @@ class HoldExpiryTests extends InventoryTest {
         assertLevels("INK-1", 5, 1);
         assertLevels("PEN-1", 5, 2);
         assertInvariants();
+        assertThat(jdbc.sql("SELECT every_seconds FROM platform.scheduled_tasks WHERE type = 'inventory.expire-holds'")
+                .query(Long.class).single()).as("the sweep runs every minute").isEqualTo(60);
     }
 
     @Test
