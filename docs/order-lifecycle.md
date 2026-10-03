@@ -52,7 +52,7 @@ stateDiagram-v2
 | AWAITING_PAYMENT | CANCELLED | PaymentFailed or PaymentExpired; or the hold was lost after payment and its stock could not be taken again | Saga | Release coupon and stock; refund in the lost-hold case |
 | AWAITING_PAYMENT | CANCELLING | CancelOrder | Customer, support | CancelPayment |
 | CONFIRMED | CANCELLING | CancelOrder before handover | Customer, support | CancelShipment |
-| CANCELLING | CANCELLED | Payment cancelled, failed or expired; or the refund was initiated | Saga | Release coupon and stock; refund if money was taken |
+| CANCELLING | CANCELLED | Payment cancelled, failed or expired; or the refund was requested | Saga | Release coupon and stock; refund if money was taken |
 | CANCELLING | SHIPPED | ShipmentCancelRefused: already handed over | Saga | Cancellation refused; the customer is told |
 | CONFIRMED | SHIPPED | ShipmentHandedOver | Saga | FulfillReservation |
 | SHIPPED | DELIVERED | ShipmentDelivered | Saga | The process completes |
@@ -61,7 +61,7 @@ stateDiagram-v2
 
 **Reasons.** `REJECTED`: `OUT_OF_STOCK`, `COUPON_UNAVAILABLE`, `PAYMENTS_UNAVAILABLE`. `CANCELLED`: `CUSTOMER`, `SUPPORT`, `PAYMENT_FAILED`, `PAYMENT_EXPIRED`, `STOCK_LOST_AFTER_PAYMENT`.
 
-**Refunds and the order status.** An order becomes `CANCELLED` or `RETURNED_TO_ORIGIN` once its refund is *initiated*. The refund's progress lives on the payment record; a failed refund raises an alert and a support task ([failure-handling S18](failure-handling.md#s18-a-refund-fails)).
+**Refunds and the order status.** An order becomes `CANCELLED` or `RETURNED_TO_ORIGIN` in the transaction that requests its refund; the outbox guarantees the request is delivered ([LLD §6.4](low-level-design.md#64-orders)). The refund's progress lives on the payment record, and the order shows it; a failed refund raises an alert and a support task ([failure-handling S18](failure-handling.md#s18-a-refund-fails)).
 
 **What customers see** is the order status plus details composed at read time: payment status, refund status and shipment tracking. The order does not copy those states; it references the records that own them.
 

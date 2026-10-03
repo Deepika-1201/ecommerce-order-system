@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| Status | Grows with each module's schema. Phase 2 (platform), phase 3 (catalog, customer), phase 4 (cart, pricing), phase 5 (inventory) |
-| Decisions | [ADR-005](decisions/ADR-005-postgresql.md) (PostgreSQL, a schema per module), [ADR-008](decisions/ADR-008-transactional-outbox.md) (outbox), [ADR-009](decisions/ADR-009-inventory-reservation.md) (reservations), [ADR-010](decisions/ADR-010-idempotency.md) (idempotency), [ADR-021](decisions/ADR-021-stock-movements.md) (stock movements) |
+| Status | Grows with each module's schema. Phase 2 (platform), phase 3 (catalog, customer), phase 4 (cart, pricing), phase 5 (inventory), phase 6 (ordering, address snapshots, payment and shipment simulators) |
+| Decisions | [ADR-005](decisions/ADR-005-postgresql.md) (PostgreSQL, a schema per module), [ADR-008](decisions/ADR-008-transactional-outbox.md) (outbox), [ADR-009](decisions/ADR-009-inventory-reservation.md) (reservations), [ADR-010](decisions/ADR-010-idempotency.md) (idempotency), [ADR-021](decisions/ADR-021-stock-movements.md) (stock movements), [ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md) (simulators), [ADR-023](decisions/ADR-023-order-address-snapshots.md) (address snapshots) |
 
 ## 1. Conventions
 
@@ -64,6 +64,7 @@ erDiagram
 |---|---|---|
 | `customers` | `id`, `subject` (the identity provider's user id), `email`, `name`, `phone`, `created_at`, `updated_at` | `subject` unique |
 | `addresses` | `id`, `customer_id`, `recipient_name`, `phone`, `line1`, `line2`, `landmark`, `city`, `state_code` (GST state code), `pin_code`, `is_default`, `created_at`, `updated_at` | `(customer_id)` unique where `is_default`; `pin_code` checked (`^[1-9][0-9]{5}$`); `(customer_id, created_at)` |
+| `address_snapshots` (phase 6) | `id`, `customer_id`, the address's fields, `created_at` | Never updated; one per address an order is placed with ([ADR-023](decisions/ADR-023-order-address-snapshots.md)) |
 
 Account deletion (phase 13) anonymizes these rows instead of deleting them where orders still refer to the customer.
 
@@ -120,3 +121,30 @@ erDiagram
 - Movements are never updated or deleted, and a stock item's `on_hand` equals the sum of its movements ([ADR-021](decisions/ADR-021-stock-movements.md)). Their ids are taken under the stock row's lock, so a SKU's movements sort in the order they were applied ([LLD §5.8](low-level-design.md#58-stock-movements)).
 - Reservation lines have no foreign key to `stock_items`: a rejected reservation can name a SKU that has no stock item.
 - Reservations are kept, like the orders they belong to.
+
+## 8. `ordering` (phase 6)
+
+```mermaid
+erDiagram
+    orders ||--|{ order_lines : "order_id"
+    orders ||--|| order_processes : "order_id"
+```
+
+| Table | Columns | Constraints and indexes |
+|---|---|---|
+| `orders` | `id`, `number`, `customer_id`, `quote_id`, `status`, `reason`, `short_sku`, `tax_regime`, `supply_state_code`, `delivery_state_code`, `coupon_id`, `coupon_code`, the quote's totals with the shipping fee's tax, `delivery_address_id`, `billing_address_id` (snapshot ids), `payment_id`, `checkout_url`, `refund_amount_paise`, `refund_status`, `version`, `placed_at`, `updated_at` | `number` and `quote_id` unique; `reason` only with `REJECTED` and `CANCELLED`, and from that status's list; `short_sku` exactly with `OUT_OF_STOCK`; the totals add up, as a quote's; `(customer_id, id)`, for a customer's orders newest first |
+| `order_lines` | `order_id`, `line_no`, and the quote line's fields | Primary key `(order_id, line_no)`; the amounts add up, as a quote line's |
+| `order_processes` | `order_id`, `step`, `cancel_reason`, `cancel_code`, `cancel_note`, `cancel_requested_at`, `hold_expires_at`, `deadline_at`, `attempts`, `refund_reason`, `version`, `created_at`, `updated_at` | Primary key and foreign key `order_id`; a deadline exactly while the step is not `DONE`; `(deadline_at)` partial on steps other than `DONE`, for the sweep |
+
+- The order number comes from the sequence `order_numbers`; it is for display and never grants access.
+- Address snapshots, the quote and the coupon live in other schemas, referenced by id without foreign keys.
+
+## 9. Simulators (phase 6, until phases 7 and 8)
+
+| Table | Columns | Constraints |
+|---|---|---|
+| `payments.simulated_payments` | `order_id`, `payment_id`, `amount_paise`, `status`, `expires_at`, `version`, `created_at`, `updated_at` | Primary key `order_id`; `payment_id` unique |
+| `payments.simulated_refunds` | `order_id`, `reason`, `refund_id`, `amount_paise`, `created_at` | Primary key `(order_id, reason)`: one refund per order and reason |
+| `fulfillment.simulated_shipments` | `order_id`, `status`, `version`, `created_at`, `updated_at` | Primary key `order_id` |
+
+Phases 7 and 8 drop these tables with the simulators ([ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md)).

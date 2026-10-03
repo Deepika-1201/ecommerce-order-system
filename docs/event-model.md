@@ -45,17 +45,20 @@ Kafka record: key = `aggregate_id`; value = the envelope as JSON; headers `trace
 |---|---|---|---|---|
 | ReserveStock | Saga | Inventory | One reservation per order | StockReserved, StockReservationFailed |
 | CommitReservation | Saga | Inventory | Status guard | ReservationCommitted, ReservationLost |
-| ReleaseReservation | Saga | Inventory | Status guard | ReservationReleased |
+| ReleaseReservation | Saga | Inventory | Status guard | — |
 | FulfillReservation | Saga | Inventory | Status guard | — |
 | RestockReturn | Saga | Inventory | One restock per order | — |
 | ReserveCoupon, CommitCoupon, ReleaseCoupon | Saga | Pricing | One redemption per order; status guard | CouponReserved, CouponUnavailable |
 | CreatePayment | Saga | Payments | One payment record per order; gateway key from the order id | PaymentCreated, PaymentCreationFailed |
 | CancelPayment | Saga | Payments | Gateway key from the order id | PaymentCancelled, PaymentCancelRefused |
+| CheckPayment | Saga, at a deadline | Payments | Read only | The payment's outcome, or PaymentPending |
 | RefundPayment | Saga | Payments | Gateway key from the order id and the reason | RefundInitiated |
 | CreateShipment | Saga | Fulfillment | One shipment per order | — (ShipmentBooked follows) |
 | CancelShipment | Saga | Fulfillment | Status guard | ShipmentCancelled, ShipmentCancelRefused |
 
-Domain events the saga consumes: PaymentSucceeded, PaymentFailed, PaymentExpired, PaymentCancelled, RefundSucceeded, RefundFailed (Payments); ShipmentBooked, ShipmentBookingFailed, ShipmentHandedOver, ShipmentDelivered, ShipmentReturnInitiated, ShipmentReturnedToOrigin (Fulfillment); ReservationExpired (Inventory).
+Domain events the saga consumes: PaymentSucceeded, PaymentFailed, PaymentExpired, PaymentCancelled, RefundSucceeded, RefundFailed (Payments); ShipmentBooked, ShipmentBookingFailed, ShipmentHandedOver, ShipmentDelivered, ShipmentReturnInitiated, ShipmentReturnedToOrigin (Fulfillment).
+
+Phase 6 added `CheckPayment` and dropped the replies and events nothing consumes, such as `ReservationReleased` and `ReservationExpired`; RefundSucceeded, RefundFailed, ShipmentBooked and ShipmentBookingFailed arrive with phases 7 and 8 ([LLD §6.2](low-level-design.md#62-module-boundaries-and-messages)).
 
 ## 4. Integration events (Kafka)
 

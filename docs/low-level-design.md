@@ -982,7 +982,7 @@ Phase 5 delivers:
 
 Not yet:
 
-- **Phase 6:** the messages that will call the reservation operations (`ReserveStock`, `CommitReservation`, `ReleaseReservation`, `FulfillReservation`, `RestockReturn`), their replies, and `ReservationExpired`. The platform refuses to publish a message type that nothing handles, so each message arrives with its handler.
+- **Phase 6:** the messages that will call the reservation operations (`ReserveStock`, `CommitReservation`, `ReleaseReservation`, `FulfillReservation`, `RestockReturn`) and their replies. The platform refuses to publish a message type that nothing handles, so each message arrives with its handler.
 - **Phase 9:** `stock.level_changed` and the catalog's availability hints.
 - **Phase 16:** the waiting room, the sold-out short-circuit and shorter holds for flash-sale SKUs.
 - **Later:** more than one location. Every key already includes the location (Q8, Q15).
@@ -1093,7 +1093,7 @@ stateDiagram-v2
 - **An on-demand reclaim waits for them instead,** locking in id order. A hold that the sweep or another order's reclaim has claimed but not yet given back then has its units back before the retry. Skipping it would reject an order that the next millisecond could have filled, which is how an expired hold would still block an order.
 - **Whole reservations expire,** never single lines, because a reservation covers all of its order's lines or none.
 - **Cost:** both queries use a partial index on `expires_at` over `HELD` reservations. They cost in proportion to the holds waiting to expire, not to the history.
-- **Phase 6** publishes `ReservationExpired` from the same transaction, for the saga. Ordering's deadline sweep still polls the gateway at hold expiry, and if the payment succeeded, `commit` takes the stock again (§5.5).
+- **The saga does not need to hear about it.** Its own deadline at the hold's expiry asks for the payment's outcome, and if the payment succeeded, `commit` takes the stock again (§5.5, §6.7).
 
 ### 5.7 Locks and timeouts
 
@@ -1210,3 +1210,231 @@ Reservations have no HTTP API: orders drive them from phase 6, and the tests in 
 | Availability never goes negative | The `CHECK` constraint (`StockSchemaTests`); `StockInvariantTests`, including concurrent operations and adjustments racing reservations |
 | An expired hold never blocks an order, even with the sweep stopped (FR-INV5) | `HoldExpiryTests`; `LastUnitTests`, for a hold that another transaction is expiring at that moment |
 | Receipts and adjustments carry a reason and are audit-logged (FR-INV7) | `WarehouseStockTests`, and the demo against Keycloak in CI |
+
+## 6. Ordering and the saga (phase 6)
+
+### 6.1 Scope
+
+Phase 6 delivers:
+
+- **Orders:** placement from a quote with an `Idempotency-Key`; immutable copies of the lines, totals and addresses; the status customers see, with the reason for any failure (FR-ORD1, FR-ORD6).
+- **The order process:** the orchestrated saga of [ADR-007](decisions/ADR-007-saga-orchestration.md), over the messages of [event model §3](event-model.md#3-internal-commands-and-replies), with every participant: Inventory and Pricing for real, Payments and Fulfillment as simulators ([ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md)).
+- **Deadlines:** every waiting step has one, and a sweep every minute asks again or alerts (FR-ORD3).
+- **Cancellation** wherever the lifecycle allows it, by the customer or by support with a reason code (FR-ORD4, FR-ORD5).
+
+Not yet:
+
+- **Phase 7:** the gateway adapter, hosted checkout, webhooks and polls, which replace the payment simulator.
+- **Phase 8:** shipments, the carrier, the warehouse's handover and tracking, which replace the shipment simulator.
+- **Phase 9:** integration events (`order.placed` and the rest) and notifications.
+- **Phase 10:** the deadline sweep moves to the Job Scheduler.
+- **Phase 13:** guest checkout, with its signed order links (FR-CUS2). Phase 6 places orders for signed-in customers; the order model leaves room for a guest's contact details.
+
+### 6.2 Module boundaries and messages
+
+Each participant owns its commands and replies: records in its base package. Ordering depends on the participants, never the reverse.
+
+| Command, from the saga | Handled by | Replies |
+|---|---|---|
+| `ReserveStock(order, lines, hold)` | Inventory | `StockReserved(order, reservation, expiresAt)`, `StockReservationFailed(order, sku, available)` |
+| `CommitReservation(order)` | Inventory | `ReservationCommitted`, `ReservationLost` |
+| `ReleaseReservation`, `FulfillReservation`, `RestockReturn` | Inventory | — |
+| `ReserveCoupon(order, coupon, customer)` | Pricing | `CouponReserved`, `CouponUnavailable(reason)` |
+| `CommitCoupon`, `ReleaseCoupon` | Pricing | — |
+| `CreatePayment(order, amount, expiresAt)` | Payments | `PaymentCreated(payment, checkoutUrl)`, `PaymentCreationFailed` |
+| `CancelPayment(order)` | Payments | `PaymentCancelled`, `PaymentCancelRefused` |
+| `CheckPayment(order)` | Payments | The payment's outcome, or `PaymentPending` |
+| `RefundPayment(order, amount, reason)` | Payments | `RefundInitiated(refund, amount)` |
+| `CreateShipment(order)` | Fulfillment | — |
+| `CancelShipment(order)` | Fulfillment | `ShipmentCancelled`, `ShipmentCancelRefused` |
+
+Events the saga also consumes: `PaymentSucceeded`, `PaymentFailed`, `PaymentExpired` (Payments); `ShipmentHandedOver`, `ShipmentDelivered`, `ShipmentReturnInitiated`, `ShipmentReturnedToOrigin` (Fulfillment).
+
+- **Commands carry everything their handler needs** (lines, amounts, ids), so no participant reads the `ordering` schema.
+- **Changes to event model §3:**
+  - `CheckPayment` is new. It is the deadline's "poll the gateway" as a command, so that Payments decides how to ask (from phase 7, a task that calls the gateway).
+  - Releases, coupon commits, handovers and restocks have no replies: only a bug can make them fail, the outbox delivers them, and a failure parks the message for an operator (§2.4). `ReservationReleased` is dropped, since nothing would consume it and the platform refuses a message nothing handles.
+  - `ReservationExpired` is not published: the saga's deadline at the hold's expiry covers it (§6.7).
+  - `ShipmentBooked`, `ShipmentBookingFailed`, `RefundSucceeded` and `RefundFailed` arrive in phases 7 and 8, with the consumers that need them.
+- **Origins** (§2.3): the saga's commands come from aggregate `order`, with the process's version. Replies come from `reservation`, `coupon_redemption`, `payment` or `shipment`, keyed by the order id, with that record's version (0 for coupon redemptions, which have none).
+- **No order across message types.** Each type has its own handler, and the outbox orders messages per handler (§2.3), so a `PaymentSucceeded` can overtake the `PaymentCreated` before it. The saga defines what every message means in every step (§6.5).
+
+### 6.3 Placement
+
+`POST /v1/me/orders` with `{quote_id, delivery_address_id, billing_address_id}` and an `Idempotency-Key`. The billing address is optional and defaults to the delivery address. One transaction, inside the key's (§2.8):
+
+1. **The quote** is the caller's (`404 not_found` otherwise), still valid (`409 quote_expired`: quote again), and not yet ordered (`409 quote_already_ordered`; one order per quote, by a unique index).
+2. **The addresses** are the caller's (`422 address_not_found`), and the delivery address is in the state the quote was priced for (`422 address_state_mismatch`), since GST depends on it. Customer snapshots each one ([ADR-023](decisions/ADR-023-order-address-snapshots.md)).
+3. **The order** is `PLACED`, with an order number (`EC` and 9 digits from a sequence, for display only) and copies of the quote's lines, totals, tax regime and coupon. The prices are the quote's: the customer accepted them, and the quote is still valid.
+4. **The process** starts at `RESERVING_STOCK`, with `ReserveStock` in the outbox.
+
+The answer is `202 Accepted` with `Location: /v1/me/orders/{id}` and the order. A replay with the same key returns the same answer.
+
+- **No wait for `AWAITING_PAYMENT`** (the question HLD §11.1 left to this LLD): the client follows the order's status. Waiting would hold a request thread across the saga's first three steps, and from phase 7 across a call to the gateway, to save one poll.
+- **Placement does not check stock.** The reservation is the only authoritative check ([ADR-009](decisions/ADR-009-inventory-reservation.md)); an order short of stock is `REJECTED`, naming the SKU, a moment later.
+
+### 6.4 Orders
+
+| Field | Holds |
+|---|---|
+| Status | As [order lifecycle §2](order-lifecycle.md#2-order-state-machine). Every change is checked against its table; any other is a bug (`IllegalStateException`) |
+| Reason | `REJECTED`: `OUT_OF_STOCK` (with the SKU), `COUPON_UNAVAILABLE`, `PAYMENTS_UNAVAILABLE`. `CANCELLED`: `CUSTOMER`, `SUPPORT`, `PAYMENT_FAILED`, `PAYMENT_EXPIRED`, `STOCK_LOST_AFTER_PAYMENT` |
+| Payment | Its id, and the checkout URL while `AWAITING_PAYMENT` |
+| Refund | The amount, and its status: `REQUESTED` when the saga asks for it, `INITIATED` when Payments confirms |
+| Copies | Lines, totals, tax regime, coupon, and the ids of the address snapshots. Never changed after placement |
+
+- **Each change locks the order's row** (`SELECT … FOR UPDATE`), whether it comes from the API or a message. With the domain model's optimistic lock, the losing side of a race would retry; with the row lock, a cancellation and a payment outcome take turns ([order lifecycle §5](order-lifecycle.md#5-races-and-how-they-resolve)), and nothing needs a retry loop.
+- **An order takes its final status** (`CANCELLED` or `RETURNED_TO_ORIGIN`) **in the transaction that requests its refund** (amends order lifecycle §2, which waited for the refund to be initiated). The outbox guarantees the request is delivered, the process asks again until `RefundInitiated` arrives (§6.7), and customers see the refund's own status beside the order's.
+
+### 6.5 The order process
+
+One process per order, in its own row: the step it is in, the cancellation request if any, the hold's expiry, the deadline and the attempts at the current step.
+
+| Step | Order | Waits for | Then |
+|---|---|---|---|
+| `RESERVING_STOCK` | `PLACED` | `ReserveStock`'s reply | `StockReserved` → `ReserveCoupon`, `RESERVING_COUPON`; without a coupon, `CreatePayment`, `CREATING_PAYMENT`.<br/>`StockReservationFailed` → `REJECTED` (`OUT_OF_STOCK`), `DONE` |
+| `RESERVING_COUPON` | `PLACED` | `ReserveCoupon`'s reply | `CouponReserved` → `CreatePayment`, `CREATING_PAYMENT`.<br/>`CouponUnavailable` → `ReleaseReservation`, `REJECTED` (`COUPON_UNAVAILABLE`), `DONE` |
+| `CREATING_PAYMENT` | `PLACED` | `CreatePayment`'s reply | `PaymentCreated` → `AWAITING_PAYMENT`, for the order too.<br/>`PaymentCreationFailed` → release, `REJECTED` (`PAYMENTS_UNAVAILABLE`), `DONE`.<br/>A payment outcome first → as if created, then as in `AWAITING_PAYMENT` |
+| `AWAITING_PAYMENT` | `AWAITING_PAYMENT` | The payment's outcome | `PaymentSucceeded` → `CommitReservation`, `COMMITTING_STOCK`.<br/>`PaymentFailed`, `PaymentCancelled` → release, `CANCELLED` (`PAYMENT_FAILED`), `DONE`; `PaymentExpired` → the same with `PAYMENT_EXPIRED`.<br/>`PaymentPending` → ask again in 5 minutes |
+| `COMMITTING_STOCK` | `AWAITING_PAYMENT` | `CommitReservation`'s reply | `ReservationCommitted` → `CommitCoupon`, `CreateShipment`, `CONFIRMED`, `AWAITING_HANDOVER`.<br/>`ReservationLost` → `RefundPayment`, `ReleaseCoupon`, `CANCELLED` (`STOCK_LOST_AFTER_PAYMENT`), `REFUNDING` |
+| `AWAITING_HANDOVER` | `CONFIRMED` | The handover | `ShipmentHandedOver` → `FulfillReservation`, `SHIPPED`, `AWAITING_DELIVERY`.<br/>A later shipment event first → as if handed over, then as in `AWAITING_DELIVERY` |
+| `AWAITING_DELIVERY` | `SHIPPED` | Delivery | `ShipmentDelivered` → `DELIVERED`, `DONE`.<br/>`ShipmentReturnInitiated` → `DELIVERY_FAILED`, `AWAITING_RETURN`.<br/>`ShipmentReturnedToOrigin` first → as if initiated, then as in `AWAITING_RETURN` |
+| `AWAITING_RETURN` | `DELIVERY_FAILED` | The parcel back | `ShipmentReturnedToOrigin` → `RestockReturn`, `RefundPayment`, `RETURNED_TO_ORIGIN`, `REFUNDING` |
+| `CANCELLING_PAYMENT` | `CANCELLING` | `CancelPayment`'s reply | `PaymentCancelled`, `PaymentFailed`, `PaymentExpired` → release, `CANCELLED`, `DONE`.<br/>`PaymentCancelRefused` → `AWAITING_PAYMENT_OUTCOME`.<br/>`PaymentSucceeded` → `RefundPayment`, release, `CANCELLED`, `REFUNDING` |
+| `AWAITING_PAYMENT_OUTCOME` | `CANCELLING` | The payment's outcome, an attempt being in flight | As `CANCELLING_PAYMENT`, and `PaymentPending` → ask again in 5 minutes |
+| `CANCELLING_SHIPMENT` | `CANCELLING` | `CancelShipment`'s reply | `ShipmentCancelled` → `RefundPayment`, release, `CANCELLED`, `REFUNDING`.<br/>`ShipmentCancelRefused` → `FulfillReservation`, `SHIPPED`, `AWAITING_DELIVERY`.<br/>A shipment event first → as in `AWAITING_HANDOVER`: the cancellation lost the race |
+| `REFUNDING` | Final | `RefundPayment`'s reply | `RefundInitiated` → refund `INITIATED`, `DONE` |
+| `DONE` | Final | — | `PaymentSucceeded` for an order never paid → `RefundPayment` (`LATE_SUCCESS`, FR-PAY5), `REFUNDING`.<br/>`CouponReserved` for a `REJECTED` or `CANCELLED` order → `ReleaseCoupon` |
+
+- **Release** means `ReleaseReservation`, plus `ReleaseCoupon` if the order has a coupon. A refund is always the order's grand total (FR-PAY4).
+- **The hold** is the payment window (15 minutes) + the gateway's grace (30) + a margin (5), as [ADR-009](decisions/ADR-009-inventory-reservation.md) sets. The payment expires at the hold's expiry minus the grace and the margin, so both count from the same moment (FR-PAY1).
+- **A cancellation requested before a step's reply** (in the first three steps, or in `COMMITTING_STOCK`) turns the reply's way forward into compensation. Whatever is held is released, a created payment is cancelled (`CancelPayment`, `CANCELLING_PAYMENT`), and a successful one refunded. The order ends `CANCELLED`, with the cancellation's reason.
+- **Every other message is ignored.** A message the step does not expect is a duplicate (a redelivery, or the reply to a command sent again), late (the process moved on), or one that a duplicate overtook. It changes nothing and is logged; `processed_messages` still records it. The `DONE` row lists the exceptions: they undo what a late reply did elsewhere, such as a coupon reserved by a command sent again after the order was rejected.
+- **One pure function decides:** `OrderProcess.decide(state, message)` returns the step and status changes, the commands and the deadline. The handlers lock, decide, save and publish in the delivery transaction, and the tests check the table cell by cell without a database.
+
+### 6.6 Cancellation
+
+| Status | On a cancellation request | Then |
+|---|---|---|
+| `PLACED` | `CANCELLING`; the current step goes on | Its reply releases what is held: `CANCELLED` |
+| `AWAITING_PAYMENT`, waiting for the payment | `CANCELLING`; `CancelPayment` | Cancelled, failed or expired → release: `CANCELLED`. Refused, with an attempt in flight → wait for the outcome; if it succeeds, refund and release |
+| `AWAITING_PAYMENT`, committing after the payment | `CANCELLING` | The commit's reply → refund and release: `CANCELLED` |
+| `CONFIRMED` | `CANCELLING`; `CancelShipment` | Cancelled → refund and release: `CANCELLED`. Refused, as already handed over → `SHIPPED`; the cancellation is refused |
+| `CANCELLING`, `CANCELLED` | Nothing changes; the order is returned as it is | |
+| `SHIPPED` and later, `REJECTED` | `409 order_invalid_state` | Returns arrive in V2 |
+
+- **Customers:** `POST /v1/me/orders/{id}/cancel` with an `Idempotency-Key`; reason `CUSTOMER`.
+- **Support:** `POST /v1/support/orders/{id}/cancel` with `{reason_code, note}` and an `Idempotency-Key`; reason `SUPPORT`. The codes are `CUSTOMER_REQUEST`, `SUSPECTED_FRAUD`, `ITEM_UNAVAILABLE`, `PRICING_ERROR` and `OTHER`, which needs a note. Audit-logged as `ordering.order.cancel-requested`, with the code and the note (FR-ORD5).
+- **The answer** is `202` with the order: `CANCELLING`, or already `CANCELLED`.
+
+### 6.7 Deadlines and the sweep
+
+The recurring task `ordering.sweep-deadlines` runs every minute, in process until phase 10. It reads up to 100 processes past their deadline, oldest first, and handles each in its own transaction, under the same locks as a message (the order's row, then the process's), after checking the deadline again. Two sweeps at once therefore never act twice.
+
+| Step | Deadline | When it passes |
+|---|---|---|
+| `RESERVING_STOCK`, `RESERVING_COUPON`, `CREATING_PAYMENT`, `COMMITTING_STOCK` | 2 minutes | Send the step's command again |
+| `AWAITING_PAYMENT`, `AWAITING_PAYMENT_OUTCOME` | The hold's expiry | `CheckPayment`; again 5 minutes later while it is pending |
+| `CANCELLING_PAYMENT`, `CANCELLING_SHIPMENT`, `REFUNDING` | 10 minutes | Send the step's command again |
+| `AWAITING_HANDOVER` | 24 hours | Alert, and wait another 24 hours |
+| `AWAITING_DELIVERY` | 14 days | Alert: the parcel may be lost |
+| `AWAITING_RETURN` | 21 days | Alert |
+
+- **A command sent again is a new message** with the same content. Participants are idempotent per order (§6.8), and the second reply is ignored (§6.5).
+- **Alerts:** from the third attempt at a step, and at each alerting deadline, the sweep logs `order_process_overdue` at `ERROR` with the order id, step and attempts. Phase 12 turns it into a metric and an alert rule.
+- **A deadline never decides an outcome:** it only asks again. Only a participant's answer moves the process.
+
+### 6.8 Participants
+
+**Inventory** handles its five commands by calling `StockReservations` (§5.2) and publishing the reply in the delivery transaction. The reservation's own transactions commit first. If the delivery transaction then fails, the redelivered command repeats the operation, which returns the recorded outcome. A lock timeout fails the delivery, which is retried with backoff (§2.4).
+
+**Pricing** handles its three commands with `CouponRedemptions` (§4.10), in the delivery transaction. An exhausted coupon is not recorded, so a command sent again can succeed later: that is the `CouponReserved` the `DONE` row releases.
+
+**Payments and Fulfillment** handle theirs with simulators, until phases 7 and 8 replace them ([ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md)):
+
+| Simulator | Record per order | Commands | Tests drive it with |
+|---|---|---|---|
+| Payments | `payments.simulated_payments`: payment id, amount, status (`REQUIRES_PAYMENT`, `PROCESSING`, `SUCCEEDED`, `FAILED`, `EXPIRED`, `CANCELLED`, or `CREATION_REFUSED`), expiry. `payments.simulated_refunds`: one per order and reason | Create: `PaymentCreated`, with `https://checkout.simulator.invalid/pay/{payment}`, or `PaymentCreationFailed` if refused.<br/>Cancel: `PaymentCancelled` before an attempt; `PaymentCancelRefused` during one or after a success; a failure or expiry is answered as such.<br/>Check: the outcome, expiring the payment if its time is up, or `PaymentPending`.<br/>Refund: `RefundInitiated` | `PaymentSimulator`: `refuseCreation`, `startAttempt`, `succeed`, `fail`, `expire` |
+| Fulfillment | `fulfillment.simulated_shipments`: status (`BOOKED`, `HANDED_OVER`, `DELIVERED`, `RETURNING`, `RETURNED`, `CANCELLED`) | Create: booked at once, no reply.<br/>Cancel: `ShipmentCancelled` before the handover, even before the create arrives (which then does nothing); `ShipmentCancelRefused` after | `ShipmentSimulator`: `handOver`, `deliver`, `startReturn`, `completeReturn` |
+
+- **Each command is idempotent per order:** a repeat answers from the record.
+- **The outcome methods publish the events the real modules will** (`PaymentSucceeded`, `ShipmentHandedOver`, …), in their own transaction.
+
+### 6.9 API
+
+| Endpoint | Access | Purpose |
+|---|---|---|
+| `POST /v1/me/orders` | `customer` | Place an order from a quote (§6.3); `Idempotency-Key` |
+| `GET /v1/me/orders` | `customer` | The caller's orders, newest first, paginated |
+| `GET /v1/me/orders/{id}` | `customer` | One order: status and reason, lines, totals, addresses, the checkout URL while awaiting payment, the refund |
+| `POST /v1/me/orders/{id}/cancel` | `customer` | Cancel (§6.6); `Idempotency-Key` |
+| `GET /v1/support/orders/{id}` | `support` | Any order, as its customer sees it, plus the customer id |
+| `POST /v1/support/orders/{id}/cancel` | `support` | Cancel with a reason code; `Idempotency-Key` |
+
+| Code | Status | When |
+|---|---|---|
+| `not_found` | 404 | No such order or quote, or not the caller's ([ADR-017](decisions/ADR-017-customer-resources-under-me.md)) |
+| `quote_expired` | 409 | The quote's 10 minutes are over: quote again |
+| `quote_already_ordered` | 409 | Another order was placed from this quote |
+| `order_invalid_state` | 409 | The order cannot be cancelled in its status |
+| `address_not_found` | 422 | No such address among the caller's |
+| `address_state_mismatch` | 422 | The delivery address is in another state than the quote's |
+
+### 6.10 Database
+
+```mermaid
+erDiagram
+    orders ||--|{ order_lines : "order_id"
+    orders ||--|| order_processes : "order_id"
+```
+
+| Table | Holds |
+|---|---|
+| `orders` | Number, customer, quote (unique), status, reason, short SKU, totals, tax regime, states, coupon, address snapshot ids, payment id, checkout URL, refund amount and status, `version` |
+| `order_lines` | The quote's lines: SKU, product, variant, title, options, image, quantity, prices, discount and tax |
+| `order_processes` | Step, the cancellation request (by whom, reason, code, note), hold expiry, deadline, attempts, refund reason, `version` |
+
+- `order_processes (deadline_at)` is a partial index over steps other than `DONE`, for the sweep.
+- Customer gains `address_snapshots` ([ADR-023](decisions/ADR-023-order-address-snapshots.md)); Payments and Fulfillment their simulators' tables (§6.8).
+- Columns and indexes are in [database.md](database.md#8-ordering-phase-6).
+
+### 6.11 Configuration
+
+| Property | Default | Notes |
+|---|---|---|
+| `ecom.ordering.payment-window` | `15m` | How long the customer has to pay ([ADR-009](decisions/ADR-009-inventory-reservation.md)) |
+| `ecom.ordering.gateway-grace` | `30m` | How long after the window the gateway may still report a success |
+| `ecom.ordering.hold-margin` | `5m` | Added to the hold beyond the grace |
+
+### 6.12 Local environment and demo
+
+`scripts/demo-orders.sh`, which the CI container job also runs:
+
+1. The admin creates a product, and meera receives 2 units.
+2. Asha adds a Karnataka address, puts 1 unit in her cart, quotes it and places an order. The same request with the same key returns the same order; ravi gets `404`.
+3. The order reaches `AWAITING_PAYMENT`, with a checkout URL; the warehouse sees 1 unit reserved.
+4. Asha cancels: the order is `CANCELLED` (`CUSTOMER`), and the unit is available again.
+5. An order for 3 units is `REJECTED` as `OUT_OF_STOCK`, naming the SKU.
+
+Payment success and shipping need the simulators, which have no HTTP surface ([ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md)): tests show them until phases 7 and 8.
+
+### 6.13 Tests
+
+| Test | Proves |
+|---|---|
+| `OrderProcessTests` (unit) | Every cell of §6.5, for every step and message: the step and status changes, the commands and the deadline; and every message a step does not expect changes nothing. The order's status table: every allowed change, and every other refused |
+| `PlacementTests` | `202`, with the order's copies equal to the quote; replays and key reuse; another customer's quote `404`; expired and already ordered quotes `409`; the address rules `422` |
+| `OrderFlowTests` | Through the outbox, with the real Inventory and Pricing: the paths to `DELIVERED` and to `RETURNED_TO_ORIGIN`; rejections for stock, coupon and payment creation; payment failure and expiry; a hold lost after payment, refunded. Stock, coupon counters and refunds are checked at every end |
+| `CancellationTests` | Each row of §6.6 through the API, including a cancellation racing a payment success, both ways, and one racing the handover; support's reason codes and audit entries |
+| `LateReplyTests` | Through the outbox: every reply duplicated, payment events out of order, a late `CouponReserved` after a rejection, a payment that succeeds after cancellation |
+| `DeadlineTests` | Each row of §6.7: commands sent again and their duplicate replies, a payment expired through `CheckPayment`, alerts from the third attempt; two sweeps at once act once |
+| `OrderAccessTests` | Customers see only their own orders (`404` otherwise); support paths for `support` only; listing and pagination |
+| `ParticipantTests` | Inventory's and Pricing's handlers reply as §6.2 says, and repeats answer the same; the simulators' rules |
+
+### 6.14 Exit criteria
+
+| Criterion | Shown by |
+|---|---|
+| Every transition and compensation tested | `OrderProcessTests`, cell by cell; `OrderFlowTests` and `CancellationTests`, end to end |
+| Including late and duplicate replies | `OrderProcessTests` (the ignored cells and the `DONE` row), `LateReplyTests`, `DeadlineTests` |
+| Invalid transitions rejected | The order's status table in `OrderProcessTests`; `409 order_invalid_state` in `CancellationTests` |

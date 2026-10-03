@@ -63,7 +63,7 @@ Solid arrows are queries or commands; dotted arrows are events. Queries between 
   - Grand total = Σ line totals + shipping fee + tax on shipping, in paise.
   - Status changes only along the state machine in [order-lifecycle.md](order-lifecycle.md).
   - One order per quote.
-- Concurrency: optimistic locking on `version`; each transition is one transaction.
+- Concurrency: each transition locks the order's row and is one transaction ([LLD §6.4](low-level-design.md#64-orders)).
 
 **OrderProcess** (aggregate root; the saga for one order)
 
@@ -135,9 +135,9 @@ Placing a reservation updates each StockItem it touches in one local transaction
 | Context | Commands it handles | Events it emits |
 |---|---|---|
 | Ordering | PlaceOrder, CancelOrder | OrderPlaced, OrderConfirmed, OrderCancelled, OrderRejected, OrderShipped, OrderDelivered, OrderDeliveryFailed, OrderReturnedToOrigin |
-| Inventory | ReserveStock, CommitReservation, ReleaseReservation, FulfillReservation, RestockReturn, ReceiveStock, AdjustStock | StockReserved, StockReservationFailed, ReservationCommitted, ReservationLost, ReservationReleased, ReservationExpired, StockLevelChanged |
+| Inventory | ReserveStock, CommitReservation, ReleaseReservation, FulfillReservation, RestockReturn, ReceiveStock, AdjustStock | StockReserved, StockReservationFailed, ReservationCommitted, ReservationLost, StockLevelChanged |
 | Pricing | CreateQuote, ReserveCoupon, CommitCoupon, ReleaseCoupon | CouponReserved, CouponUnavailable |
-| Payments | CreatePayment, CancelPayment, RefundPayment | PaymentCreated, PaymentCreationFailed, PaymentSucceeded, PaymentFailed, PaymentExpired, PaymentCancelled, PaymentCancelRefused, RefundInitiated, RefundSucceeded, RefundFailed |
+| Payments | CreatePayment, CancelPayment, CheckPayment, RefundPayment | PaymentCreated, PaymentCreationFailed, PaymentSucceeded, PaymentFailed, PaymentExpired, PaymentCancelled, PaymentCancelRefused, PaymentPending, RefundInitiated, RefundSucceeded, RefundFailed |
 | Fulfillment | CreateShipment, CancelShipment, MarkPacked, MarkHandedOver | ShipmentBooked, ShipmentBookingFailed, ShipmentCancelled, ShipmentCancelRefused, ShipmentHandedOver, ShipmentDelivered, ShipmentReturnInitiated, ShipmentReturnedToOrigin |
 | Catalog | Product and price management | None published in V1; a product event stream arrives with its first consumer |
 | Cart, Customer | Their own create, update and delete operations | None: nothing consumes them |
