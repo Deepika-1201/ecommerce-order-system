@@ -33,6 +33,7 @@ docker compose up --build   # or: the whole stack in containers, with JSON logs
 scripts/demo-catalog.sh   # tokens, catalog admin, an image upload, anonymous browsing and search, addresses (curl and python3)
 scripts/demo-cart.sh      # a guest cart with a coupon, merged at sign-in; quotes with GST checked to the paise; owner-only access
 scripts/demo-inventory.sh # receipts and adjustments retried safely with Idempotency-Key; a SKU's movements; warehouse-only access
+scripts/demo-orders.sh    # an order placed and retried safely, followed to AWAITING_PAYMENT, cancelled; one rejected for stock
 ```
 
 | User | Password | Role |
@@ -40,8 +41,9 @@ scripts/demo-inventory.sh # receipts and adjustments retried safely with Idempot
 | `asha`, `ravi` | `asha-local-only`, `ravi-local-only` | `customer` |
 | `admin` | `admin-local-only` | `admin` |
 | `meera` | `meera-local-only` | `warehouse` |
+| `sunita` | `sunita-local-only` | `support` |
 
-These exist only in the local realm, whose `ecommerce-cli` client allows the password grant for scripts. To get a token: `curl -d grant_type=password -d client_id=ecommerce-cli -d username=asha -d password=asha-local-only localhost:8180/realms/ecommerce/protocol/openid-connect/token`.
+These exist only in the local realm, whose `ecommerce-cli` client allows the password grant for scripts. To get a token: `curl -d grant_type=password -d client_id=ecommerce-cli -d username=asha -d password=asha-local-only localhost:8180/realms/ecommerce/protocol/openid-connect/token`. Keycloak imports the realm when its container is created: after a change to it, `docker compose up --detach --force-recreate keycloak`.
 
 To use them with `./gradlew bootTestRun` instead of the app container, start only the dependencies: `docker compose up --detach keycloak s3proxy media-bucket`. The `local` profile points the app at them.
 

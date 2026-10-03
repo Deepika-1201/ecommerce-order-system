@@ -69,6 +69,8 @@ jobs:
         run: scripts/demo-cart.sh
       - name: Phase 5 demo (receipts and adjustments with Idempotency-Key, movements, warehouse-only access)
         run: scripts/demo-inventory.sh
+      - name: Phase 6 demo (placement with Idempotency-Key, the order process, cancellation, rejection)
+        run: scripts/demo-orders.sh
       - name: Show logs
         if: failure()
         run: docker compose logs

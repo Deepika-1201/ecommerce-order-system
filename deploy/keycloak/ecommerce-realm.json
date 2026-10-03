@@ -94,6 +94,16 @@
       "lastName": "Iyer",
       "credentials": [{ "type": "password", "value": "meera-local-only", "temporary": false }],
       "realmRoles": ["warehouse"]
+    },
+    {
+      "username": "sunita",
+      "enabled": true,
+      "email": "sunita@example.com",
+      "emailVerified": true,
+      "firstName": "Sunita",
+      "lastName": "Menon",
+      "credentials": [{ "type": "password", "value": "sunita-local-only", "temporary": false }],
+      "realmRoles": ["support"]
     }
   ]
 }
