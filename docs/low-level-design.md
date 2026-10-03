@@ -1441,3 +1441,223 @@ The demo follows each order's status, as a client would, since placement and can
 | Every transition and compensation tested | `OrderProcessTests`, cell by cell; `OrderFlowTests` and `CancellationTests`, end to end |
 | Including late and duplicate replies | `OrderProcessTests` (the ignored cells and the `DONE` row), `LateReplyTests`, `DeadlineTests` |
 | Invalid transitions rejected | The order's status table in `OrderProcessTests`; `409 order_invalid_state` in `CancellationTests` |
+
+## 7. Payments (phase 7)
+
+### 7.1 Scope
+
+Phase 7 delivers:
+
+- **The gateway adapter:** payments, hosted checkout sessions, cancellations and refunds through the Payment Gateway's merchant API ([ADR-002](decisions/ADR-002-payment-gateway-integration.md)). It replaces the payment simulator inside Payments ([ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md)); the saga's messages stay, with the additions of §7.2 (FR-PAY1, FR-PAY2, FR-PAY4).
+- **Outcomes** from signed webhooks, kept in an inbox and applied by resource version, and from polls: at the deadline, and when the customer returns from the checkout (FR-PAY3, S14).
+- **Refund outcomes:** the gateway's late-success refunds recorded on the order, failed refunds alerted (FR-PAY5, S13, S18).
+- **A fake gateway** in process, for tests and the default local stack, and an **ecosystem compose file** that runs the real one.
+- **Contract tests** against the gateway's OpenAPI document.
+
+Not yet:
+
+- **Phase 9:** the customer's emails about refunds.
+- **Phase 10:** reconciliation (FR-PAY6).
+- **Phase 11:** S15's circuit breaker, which fails placements fast while the gateway is down. Until then each order spends the retry budget (§7.5) and is rejected as `PAYMENTS_UNAVAILABLE`.
+- **Phase 13:** support's retry of a failed refund (S18), and rate limits on the webhook path.
+
+### 7.2 Module boundaries and messages
+
+| Package | Holds |
+|---|---|
+| `payments` | The messages (§6.2), and `PaymentSimulator`, which now drives the fake gateway (§7.10) |
+| `payments.domain` | Payment records and their refunds, the command handlers, the tasks that call the gateway, and the one place that applies the gateway's state (§7.6) |
+| `payments.gateway` | The `PaymentGateway` port, its HTTP adapter and the fake |
+| `payments.web` | The webhook endpoint (§7.7) |
+| `platform` | The webhook inbox, which phase 8's carrier webhooks share |
+
+Changes to §6.2:
+
+- **`CreatePayment(order, customer, amount, expiresAt)`** gains the customer id, which the gateway receives as `customer.reference` for its risk checks. Contact details stay out of messages.
+- **`RefundSucceeded(order, refund, reason, amount)`** and **`RefundFailed(order, refund, reason, amount)`** are new: a refund has ended. The saga consumes both (§7.9).
+- **`PaymentCancelRefused` only while an attempt is in flight.** A cancellation of a final payment is answered with its outcome, as `CheckPayment` is; the simulator refused it after a success.
+
+### 7.3 The gateway port
+
+| Operation | Gateway call | `Idempotency-Key` |
+|---|---|---|
+| Create a payment | `POST /v1/payments`: the amount in paise, `INR`, `merchant_order_id` = the order id, automatic capture, `customer.reference`, `expires_in_seconds` | `{order}:payment` |
+| Create its checkout session | `POST /v1/checkout-sessions`: the payment and the `return_url` (§7.8) | `{order}:checkout` |
+| Cancel | `POST /v1/payments/{id}/cancel`, reason `requested_by_customer` | `{order}:cancel:{version}`, with the payment's gateway version |
+| Read | `GET /v1/payments/{id}` | — |
+| Refund | `POST /v1/payments/{id}/refunds`: the amount, the reason, `merchant_refund_id` = `{order}:{reason}` | `{order}:refund:{reason}` |
+
+- **Two kinds of failure.** *Refused* carries the problem's `code`: an answer the gateway stores against the key, so a retry with the same key gets it again. *Unavailable* covers timeouts, connection failures, `5xx`, `429` and `409 idempotency_request_in_progress`: the task retries with the same key, and the gateway creates at most one payment or refund.
+- **The cancel key carries the version** for that reason: a cancel refused during an attempt is sent again once the attempt has failed, and must be a new request.
+- **The HTTP adapter** is a `RestClient` with the bearer API key, 2-second connect and 10-second read timeouts, and snake-case JSON. Unknown fields are ignored, as the gateway's contract asks. Neither the key nor the `Authorization` header is ever logged.
+
+### 7.4 Payment records
+
+One per order, in `payments.payment_records`:
+
+| Field | Holds |
+|---|---|
+| Ids | Its own (the `paymentId` of the messages), the order's (unique), and the gateway's once created (unique) |
+| Customer, amount, expiry | From `CreatePayment` |
+| Creation | `CREATING` until the gateway has the payment and its checkout session, then `CREATED`; or `FAILED` |
+| Status | The gateway's, once created: `REQUIRES_PAYMENT_METHOD`, `REQUIRES_ACTION`, `PROCESSING`, `AUTHORIZED`, and the final `SUCCEEDED`, `FAILED`, `CANCELLED`, `EXPIRED` |
+| Gateway version | The last version applied (§7.6) |
+| Checkout URL | The session's |
+| Cancel requested | Set by `CancelPayment`, so that a refused cancel is sent again (S6) |
+| `version` | Counts the record's changes: the sequence of what Payments publishes (§2.3) |
+
+Refunds, in `payments.refunds`: the order, the reason, the amount, who initiated it (`MERCHANT`, `SYSTEM_LATE_SUCCESS` or `SYSTEM_DUPLICATE_SUCCESS`), the gateway's refund id and version, and a status: `REQUESTED` until the gateway has it, then `PENDING` (the gateway's `initiated`, `pending` and `unknown`), `SUCCEEDED` or `FAILED`. One merchant refund per order and reason.
+
+### 7.5 Commands
+
+Handlers run in the delivery transaction and never call the gateway (§2.7). Tasks call it outside any transaction, then apply what they learned in a short transaction that locks the record and publishes.
+
+| Command | Handler | Task | Answer |
+|---|---|---|---|
+| `CreatePayment` | Inserts the record (`CREATING`), once per order, and schedules the task. A repeat answers from the record once it is created or failed | `payments.create-payment`: the payment, then its session, each saved as it succeeds | `PaymentCreated` with the session's URL. `PaymentCreationFailed` on a refusal, or once the budget is spent: 60 seconds from the record's creation (S15), or less than a minute left before the payment would expire. A payment created without a session is then cancelled, best effort |
+| `CancelPayment` | Sets cancel requested and schedules the task | `payments.cancel-payment` | `PaymentCancelled`. Refused: the task reads the payment; while an attempt is in flight, `PaymentCancelRefused`, and the cancel is sent again if the attempt fails (§7.6). A final payment: its outcome |
+| `CheckPayment` | Schedules the task | `payments.check-payment`: reads the payment and applies it | The outcome of a final payment, else `PaymentPending` |
+| `RefundPayment` | Inserts the refund (`REQUESTED`), once per order and reason, and schedules the task. A refund the gateway already has is answered at once | `payments.refund-payment` | `RefundInitiated`; `RefundSucceeded` or `RefundFailed` follow when it ends |
+
+- **Tasks are deduplicated per order and command** and retried with backoff, up to 10 attempts. A task that dies is replaced when the saga's deadline sends its command again (§6.7).
+- **Any other refusal** (a refund of a payment that did not succeed, an id the gateway does not know) means a bug or a gateway that lost data. It is logged at `ERROR` and answered with nothing: the saga's deadline asks again, and alerts from the third attempt.
+
+### 7.6 Applying the gateway's state
+
+Webhooks, polls and the answers to commands end in one method, which applies a payment as the gateway reports it:
+
+1. Lock the record, found by the gateway's payment id.
+2. **A version not newer** than the one recorded changes nothing.
+3. Save the status and the version.
+4. **Entering a final status** publishes `PaymentSucceeded`, `PaymentFailed`, `PaymentCancelled` or `PaymentExpired`. Under the gateway's `ACCEPT` policy, a late success turns `EXPIRED` into `SUCCEEDED`, so `PaymentSucceeded` follows and the saga refunds it (§6.5, `DONE`).
+5. **A cancel still requested** of a payment that can be cancelled again (`REQUIRES_PAYMENT_METHOD`, `REQUIRES_ACTION`) schedules the cancel (S6).
+
+And a refund:
+
+1. Lock its payment's record, then find the refund by the gateway's id, or else by `merchant_refund_id`. The gateway's own refunds are new to this system: `system_late_success` is inserted with reason `LATE_SUCCESS`. `system_duplicate_success`, which returns a second charge for an order paid once, is inserted without a reason and never published.
+2. A version not newer than the one recorded changes nothing.
+3. **Entering `succeeded` or `failed`** publishes `RefundSucceeded` or `RefundFailed`.
+
+Everything Payments publishes comes from aggregate `payment`, keyed by the order id, with the record's version.
+
+### 7.7 Webhooks
+
+`POST /v1/webhooks/payment-gateway` has no end-user authentication: the signature authenticates it ([ADR-002](decisions/ADR-002-payment-gateway-integration.md)).
+
+1. **Size:** a body over 64 KB is refused with `413 payload_too_large`, without reading the rest.
+2. **Signature:** `PG-Signature: t=…,v1=…`. The timestamp must be within 5 minutes of now, either way, and one `v1` must equal `HMAC-SHA256(secret, t + "." + raw body)` for one of the configured secrets (two while a secret is rotated), compared in constant time. Otherwise `401 invalid_signature`, logged at `WARN` without the body.
+3. **Store:** the body is parsed only for its `id` and `type` (`400 malformed_request` if it cannot be), and stored in the inbox as text, byte for byte. A known id changes nothing.
+4. **Answer** `200` after the commit, so the gateway retries until the event is stored.
+
+**The webhook inbox** is the platform's: `platform.webhook_inbox`, keyed by source and event id, with the type, the raw body, and when the event was received and processed. Storing an event schedules a task for it in the same transaction. Payments' task, `payments.apply-gateway-event`, parses the object, applies it (§7.6) and marks the event processed. Dispute events are stored and marked processed without effect: in V1 disputes are handled on the gateway's dashboard. The cleanup task deletes processed events after 30 days.
+
+### 7.8 Polls
+
+- **At the deadline:** `CheckPayment` at the hold's expiry, and every 5 minutes while the payment is pending (§6.7).
+- **On return:** `POST /v1/me/orders/{id}/payment-check`, for the order's customer, answers `202` with the order. While the order waits for its payment, it sends `CheckPayment`; otherwise nothing changes. The checkout session's `return_url` is the storefront's order page, which calls it, so a slow webhook does not hold up the confirmation (A3, S14). Repeats are absorbed: one check task per order at a time.
+
+### 7.9 The saga
+
+Amends §6.5:
+
+| Step | Message | Then |
+|---|---|---|
+| `REFUNDING` | `RefundSucceeded` for the order's refund | Refund `SUCCEEDED`, `DONE` |
+| `REFUNDING` | `RefundFailed` for the order's refund | Refund `FAILED`, `DONE`, alert |
+| `DONE` | `RefundSucceeded` or `RefundFailed` for the order's refund | Refund `SUCCEEDED`; or `FAILED`, and alert |
+| Any | `RefundSucceeded` or `RefundFailed` with reason `LATE_SUCCESS`, for an order without a refund | The gateway's late-success refund, recorded on the order (S13, FR-PAY5); alert if it failed. The step does not change |
+
+- **The order's refund** is the one with the reason the saga refunded for. Its status is `REQUESTED`, `INITIATED`, `SUCCEEDED` or `FAILED`; a `RefundInitiated` that arrives after `RefundSucceeded` (there is no order across message types) changes nothing. The saga copies these milestones from Payments' events: this amends order lifecycle §2, where the order composed them at read time, and keeps the order's reads inside Ordering.
+- **The alert** is `order_refund_failed`, logged at `ERROR` with the order, the reason and the amount. Phase 12 turns it into a metric and an alert rule; support's retry is phase 13 (S18).
+
+### 7.10 The fake gateway
+
+The fake implements the port in memory when `ecom.payments.gateway.base-url` is unset: in tests, in `bootTestRun` and in the default compose stack. It logs a warning at startup.
+
+- **It keeps the gateway's rules this system depends on:** creation idempotent per key; cancel refused (`payment_invalid_state`) during an attempt and once final; refunds only of a succeeded payment, never beyond its amount; a version that grows with every change; an event for every change the gateway reports by webhook.
+- **Its events go through the same inbox and tasks as webhooks,** without HTTP or signatures, which the webhook tests cover.
+- **Tests drive it through `PaymentSimulator`:** `refuseCreation` and `timeOutCreation`; `startAttempt`, and `failAttempt`, which returns the payment to `requires_payment_method`; `succeed`, which on a final payment makes the late-success refund (`AUTO_REFUND`), and on a succeeded one the duplicate-success refund; `fail`, `expire`; `succeedRefund` and `failRefund`, which end the order's pending refund.
+- **A restart forgets its payments.** Their orders then wait for an operator, as with a payment the gateway lost (§7.5).
+
+### 7.11 Ecosystem compose file
+
+`docker-compose.ecosystem.yml` adds the real gateway to the stack:
+
+```
+docker compose -f docker-compose.yml -f docker-compose.ecosystem.yml up --build --detach
+```
+
+- **The gateway** is built from its repository at a pinned commit and runs its `local` profile, with the mock PSPs, on port 8090 inside the container and out: the mock PSP sends its webhooks to the address it was called on.
+- **Its database** is its own, with its own role, on this stack's PostgreSQL ([ADR-001](decisions/ADR-001-ecosystem-boundaries.md)). A one-shot container creates both if they are missing.
+- **Onboarding**, once: a one-shot container creates the merchant (webhook URL `http://app:8080/v1/webhooks/payment-gateway`, `AUTO_REFUND`, a 15-minute expiry, `MOCK_ALPHA` and `MOCK_BETA`) and an API key, and writes the key and the webhook secret to a volume that the app reads as a config tree. Later runs reuse them.
+- **A second file, not a profile:** a profile can add services but cannot change the app's settings. Without the second file, the app uses the fake, and nothing from an earlier ecosystem run is left in its settings.
+
+### 7.12 Configuration
+
+| Property | Default | Notes |
+|---|---|---|
+| `ecom.payments.gateway.base-url` | — | Unset: the fake (§7.10) |
+| `ecom.payments.gateway.api-key` | — | Required with the base URL; a secret |
+| `ecom.payments.gateway.webhook-secrets` | — | Required with the base URL; two while one is rotated |
+| `ecom.payments.gateway.connect-timeout`, `read-timeout` | `2s`, `10s` | |
+| `ecom.payments.return-url` | `http://localhost:3000/orders/{order_id}` | The storefront's order page (§7.8) |
+| `ecom.payments.creation-budget` | `60s` | S15 |
+| `ecom.payments.webhook-tolerance` | `5m` | As the gateway documents |
+
+The app refuses to start with a base URL but no API key or webhook secret.
+
+### 7.13 API
+
+| Endpoint | Access | Purpose |
+|---|---|---|
+| `POST /v1/webhooks/payment-gateway` | Signed by the gateway | Payment and refund events (§7.7) |
+| `POST /v1/me/orders/{id}/payment-check` | `customer` | Check the order's payment now (§7.8) |
+
+| Code | Status | When |
+|---|---|---|
+| `invalid_signature` | 401 | A webhook not signed with a configured secret, or signed too long ago |
+| `payload_too_large` | 413 | A webhook over 64 KB |
+
+Orders show the refund's new statuses, `SUCCEEDED` and `FAILED`.
+
+### 7.14 Database
+
+| Table | Holds |
+|---|---|
+| `payments.payment_records` | §7.4 |
+| `payments.refunds` | §7.4 |
+| `platform.webhook_inbox` | §7.7 |
+
+- The simulator's tables are dropped.
+- Ordering's refund check accepts `SUCCEEDED` and `FAILED`.
+- Columns and indexes are in [database.md](database.md).
+
+### 7.15 Local environment and demo
+
+`scripts/demo-payments.sh`, which a new CI job runs against the ecosystem stack. Each order's price picks a mock PSP scenario by its last two digits:
+
+1. **₹599.00:** asha orders, pays by card on the hosted checkout and approves on the mock PSP's page. The webhook confirms the order. She cancels it: the shipment is cancelled and the refund succeeds, so the order is `CANCELLED`, refund `SUCCEEDED`.
+2. **₹599.01:** the PSP times out but takes the money. The gateway's status checks find the success: `CONFIRMED`.
+3. **₹599.04:** pending, and the PSP never calls back. The gateway's polls find the success: `CONFIRMED`.
+4. **₹599.03:** declined. The payment could be tried again until it expires; asha cancels instead, the payment is cancelled, and the order is `CANCELLED`.
+5. A webhook with a forged signature gets `401`.
+
+### 7.16 Tests
+
+| Test | Proves |
+|---|---|
+| `GatewayContractTests` | The HTTP adapter against a stub server: each call's method, path, bearer key and `Idempotency-Key`; request bodies valid against a pinned copy of the gateway's OpenAPI document, and the stub's responses too; each documented error mapped to refused or unavailable; timeouts |
+| `WebhookTests` | §7.7 over HTTP: valid signatures, either of two secrets, a wrong secret, a body changed by one byte, timestamps too old or too new, malformed headers, oversized bodies; duplicates; the event applied by its task |
+| `PaymentTests` | §7.5 and §7.6 against the fake: each command and its repeat; the creation budget, and a payment left without a session cancelled; a cancel refused during an attempt and sent again after it fails; stale and reordered updates; the gateway's own refunds |
+| `OrderProcessTests` | The cells of §7.9, and every step against the 23 messages |
+| `RefundTests` | Through the outbox: refunds that succeed and fail, a late success recorded on a cancelled order, the return poll |
+| Phase 6's ordering tests | What they proved, now with the payment tasks run as well |
+| The ecosystem demo, in CI | §7.15 against the real gateway |
+
+### 7.17 Exit criteria
+
+| Criterion | Shown by |
+|---|---|
+| End to end against the real gateway with its mock PSP scenarios: decline, timeout, pending without a webhook | The ecosystem demo in CI |
+| Webhooks: signature, inbox, versions | `WebhookTests`, `PaymentTests` |
+| Contract tests against the gateway's OpenAPI document | `GatewayContractTests` |
