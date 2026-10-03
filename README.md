@@ -31,6 +31,7 @@ docker compose up --build   # or: the whole stack in containers, with JSON logs
 
 ```bash
 scripts/demo-catalog.sh   # tokens, catalog admin, an image upload, anonymous browsing and search, addresses (curl and python3)
+scripts/demo-cart.sh      # a guest cart with a coupon, merged at sign-in; quotes with GST checked to the paise; owner-only access
 ```
 
 | User | Password | Role |

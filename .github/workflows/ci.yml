@@ -65,6 +65,8 @@ jobs:
           exit 1
       - name: Phase 3 demo (tokens, catalog, image upload, browsing, addresses)
         run: scripts/demo-catalog.sh
+      - name: Phase 4 demo (guest cart, merge at sign-in, quotes with GST, owner-only access)
+        run: scripts/demo-cart.sh
       - name: Show logs
         if: failure()
         run: docker compose logs

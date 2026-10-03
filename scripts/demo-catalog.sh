@@ -2,50 +2,10 @@
 # Phase 3 walkthrough against the compose stack (LLD §3.12). Needs curl and python3; safe to run again.
 #   docker compose up --build --detach && scripts/demo-catalog.sh
 set -euo pipefail
+source "$(dirname "$0")/demo-lib.sh"
 
-API=${API:-http://localhost:8080}
-KEYCLOAK=${KEYCLOAK:-http://localhost:8180}
 RUN=$(date +%s)   # suffix for slugs and SKUs, so every run creates its own catalog entries
-
-BODY_FILE=$(mktemp)
-IMAGE_FILE=$(mktemp)
-trap 'rm -f "$BODY_FILE" "$IMAGE_FILE"' EXIT
-
-step() { printf '\n== %s\n' "$*"; }
-fail() { printf 'FAILED: %s\n' "$*" >&2; exit 1; }
-
-# json PATH < body: one field, by a dotted path with numeric list indexes (items.0.id).
-json() {
-  python3 -c '
-import json, sys
-value = json.load(sys.stdin)
-for key in sys.argv[1].split("."):
-    value = value[int(key)] if key.isdigit() else value[key]
-print(json.dumps(value) if isinstance(value, (dict, list)) else value)
-' "$1"
-}
-
-# api STATUS METHOD PATH TOKEN BODY [HEADER...]: prints the response body; fails on any other status.
-# TOKEN and BODY may be empty.
-api() {
-  local expected=$1 method=$2 path=$3 token=$4 body=$5
-  shift 5
-  local args=(-sS -o "$BODY_FILE" -w '%{http_code}' -X "$method")
-  if [[ -n $token ]]; then args+=(-H "Authorization: Bearer $token"); fi
-  if [[ -n $body ]]; then args+=(-H 'Content-Type: application/json' --data "$body"); fi
-  local header
-  for header in "$@"; do args+=(-H "$header"); done
-  local code
-  code=$(curl "${args[@]}" "$API$path") || fail "$method $path: no response"
-  [[ $code == "$expected" ]] || fail "$method $path: expected $expected, got $code: $(cat "$BODY_FILE")"
-  cat "$BODY_FILE"
-}
-
-# token USER PASSWORD: an access token through the local-only password grant.
-token() {
-  curl -sS --fail-with-body -X POST "$KEYCLOAK/realms/ecommerce/protocol/openid-connect/token" \
-    -d grant_type=password -d client_id=ecommerce-cli -d "username=$1" -d "password=$2" | json access_token
-}
+IMAGE_FILE="$DEMO_DIR/image.png"
 
 step "Tokens for asha and ravi (customers) and admin"
 ASHA=$(token asha asha-local-only)

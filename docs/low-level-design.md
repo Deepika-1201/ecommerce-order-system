@@ -713,7 +713,7 @@ Not yet:
 - **Writes set a line's quantity** (`PUT /lines/{sku}`), so a retried request changes nothing. An "add one" request could not promise that.
 - **Concurrent edits** lock the cart row and increment its version, so two tabs never lose each other's lines. `If-Match` with the cart's `ETag` makes a write conditional (`412 precondition_failed`). It is optional because every write names a single line. This replaces the "second tab gets `409` and re-reads" of the [consistency model](consistency-model.md), which is updated.
 - **Price changes are shown** (FR-CHK1): a line keeps the list price from when it was added, and the cart and the quote show both prices when they differ.
-- **Reading a cart** shows current prices and whether each line can still be bought. Those prices are indicative; only a quote is binding.
+- **Reading a cart** shows current prices and whether each line can still be bought. Those prices are indicative; only a quote is binding. The subtotal counts only the lines that can be bought.
 - **A customer's cart is created by its first write.** Reading before that returns an empty cart at version 0.
 - **No status column.** A merged or expired cart is deleted at once, because nothing reads a dead cart, so the domain model's `MERGED` and `EXPIRED` are deletions. Phase 6 decides what placement does to the cart (`CHECKED_OUT`).
 
@@ -793,7 +793,7 @@ Per [ADR-019](decisions/ADR-019-rounding-and-allocation.md), every amount is int
 | Step | Rule |
 |---|---|
 | Percentage discount | `floor(gross subtotal × basis points / 10,000)`, then the cap. A "10% off" never exceeds 10% |
-| Any discount | At most the gross subtotal minus ₹1, so the goods are never free and every payment is at least ₹1 |
+| Any discount | At most the gross subtotal minus ₹1, so a discount never takes the goods below ₹1. A cart under ₹1 gets no discount |
 | Allocation to lines | In proportion to each line's gross amount, by the largest-remainder method: each line gets the floor of its exact share, and the leftover paise go one each to the lines with the largest fractions, earlier lines first on ties. The shares add up to the discount exactly, and each is within one paise of exact |
 | Tax, inter-state | `IGST = round_half_up(amount × rate / (100 + rate))` |
 | Tax, intra-state | `CGST = SGST = round_half_up(amount × rate / (2 × (100 + rate)))`. One half is computed and used twice, so the two are always equal |
@@ -934,13 +934,15 @@ Columns and constraints are in [database.md](database.md). SKUs, customer ids an
 
 ### 4.14 Demo
 
-`scripts/demo-cart.sh`, which the CI container job also runs:
+`scripts/demo-cart.sh`, which the CI container job also runs, rebuilds worked example 1 (§4.7) through the API:
 
-1. An admin creates a product and a coupon.
-2. A guest fills a cart, applies the coupon and gets a quote.
-3. Asha signs in and merges the guest cart into hers; the guest token stops working.
-4. Asha gets a quote for another state: IGST instead of CGST and SGST.
-5. Ravi cannot see Asha's cart or her quote.
+1. An admin creates the example's three products and its coupon (10% off, up to ₹500).
+2. A guest adds two shirts and the shoes, and applies the coupon. A write with a stale `If-Match` gets `412`. The guest gets a quote.
+3. Asha adds a shirt and the bottle, then signs in and merges the guest cart. The guest's quantity wins and the coupon moves over, which gives the example's cart. The guest token then gets `404`, and a retried merge changes nothing.
+4. Asha's quote for Karnataka matches the example to the paise. Her quote for Maharashtra has IGST instead of CGST and SGST, with the same grand total, because prices include GST.
+5. Ravi gets `404` for Asha's quote, and his own cart has none of her lines.
+
+The demo scripts share their helpers in `scripts/demo-lib.sh`.
 
 ### 4.15 Tests
 
@@ -948,7 +950,7 @@ Property tests use jqwik 1.10, which runs on JUnit 6. A spike on 2026-10-02 show
 
 | Test | Proves |
 |---|---|
-| `QuoteCalculatorProperties` | For random carts (1–50 lines, 1–10 units, prices from 1 paise to ₹1 crore, every GST category), coupons and both regimes: the grand total is the sum of the line amounts and shipping, and also of the taxable values and taxes; each line's taxable value plus tax is its amount; CGST equals SGST; discount shares add up to the discount and are each within a paise of exact; each tax component is within half a paise of exact; the slab rule holds; the grand total is at least ₹1 |
+| `QuoteCalculatorProperties` | For random carts (1–50 lines, 1–10 units, prices from 1 paise to ₹1 crore, every GST category), coupons and both regimes: the grand total is the sum of the line amounts and shipping, and also of the taxable values and taxes; each line's taxable value plus tax is its amount; CGST equals SGST; discount shares add up to the discount and are each within a paise of exact; each tax component is within half a paise of exact; the slab rule holds; the discount is the coupon's rule, capped so the goods stay at or above ₹1 (or the gross, if that is less); shipping follows its rule at the highest line rate |
 | `QuoteCalculatorTests` | The worked examples of §4.7, to the paise |
 | `GstRatesTests`, `AllocationTests` | Slab boundaries (₹2,625.00 per piece is 5%, ₹2,625.01 is 18%); allocation with ties and caps |
 | `CartTests`, `GuestCartTests` | Lines, limits, unavailable SKUs, earlier prices, `If-Match`, coupons; the cart token is issued once, required, and `404` when unknown |
