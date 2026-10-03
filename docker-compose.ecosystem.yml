@@ -1,0 +1,96 @@
+# The ecosystem's Payment Gateway beside this system (LLD §7.11), for local runs and CI:
+#   docker compose -f docker-compose.yml -f docker-compose.ecosystem.yml up --build --detach
+# Without this file the app uses its in-memory fake gateway. Local development only: these credentials are not secrets.
+
+services:
+  # The gateway's own database and role, on this stack's PostgreSQL (ADR-001); created if missing.
+  gateway-database:
+    image: postgres:17
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: ecommerce
+      PGPASSWORD: ecommerce
+      PGDATABASE: ecommerce
+    entrypoint: ["sh", "-c"]
+    command:
+      - >-
+        set -e;
+        psql -tAc "SELECT 1 FROM pg_roles WHERE rolname = 'payment_gateway'" | grep -q 1
+        || psql -v ON_ERROR_STOP=1 -c "CREATE ROLE payment_gateway LOGIN PASSWORD 'payment_gateway'";
+        psql -tAc "SELECT 1 FROM pg_database WHERE datname = 'payment_gateway'" | grep -q 1
+        || psql -v ON_ERROR_STOP=1 -c "CREATE DATABASE payment_gateway OWNER payment_gateway";
+        echo "database payment_gateway ready"
+
+  # Built from its repository at the commit the contract tests pin; its mock PSPs pick scenarios by amount. It listens
+  # on 8090 inside too: the mock PSP sends its webhooks to the address it was called on.
+  payment-gateway:
+    build:
+      context: https://github.com/Deepika-1201/Payment-Orchestrator.git#eeeaa2e2f2cb4f5d720269736ad016fa8f82d51f
+    image: payment-gateway:eeeaa2e
+    depends_on:
+      gateway-database:
+        condition: service_completed_successfully
+    environment:
+      SPRING_PROFILES_ACTIVE: local
+      DB_URL: jdbc:postgresql://postgres:5432/payment_gateway
+      DB_USER: payment_gateway
+      DB_PASSWORD: payment_gateway
+      PORT: "8090"
+      PG_CHECKOUT_BASE_URL: http://localhost:8090
+      PG_PUBLIC_BASE_URL: http://localhost:8090
+    ports:
+      - "8090:8090"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8090 && printf 'GET /actuator/health/readiness HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+
+  # Onboards this system as a merchant once: webhooks to the app, AUTO_REFUND, the two mock PSPs. The API key and
+  # webhook secret go to a volume the app reads as a config tree; later runs reuse them.
+  gateway-onboarding:
+    image: curlimages/curl:8.22.0
+    user: "0"
+    depends_on:
+      payment-gateway:
+        condition: service_healthy
+    volumes:
+      - gateway-credentials:/credentials
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -eu
+        if [ -s /credentials/ecom.payments.gateway.api-key ]; then
+          echo "merchant already onboarded"
+          exit 0
+        fi
+        admin='Authorization: Bearer local-admin-token'
+        merchant=$$(curl -sS --fail-with-body -X POST http://payment-gateway:8090/admin/v1/merchants \
+          -H "$$admin" -H 'Content-Type: application/json' \
+          -d '{"name": "E-commerce Order System", "webhook_url": "http://app:8080/v1/webhooks/payment-gateway",
+               "late_success_policy": "AUTO_REFUND", "providers": ["MOCK_ALPHA", "MOCK_BETA"]}')
+        field() { printf '%s' "$$2" | grep -o "\"$$1\" *: *\"[^\"]*\"" | head -1 | sed 's/.*: *"\(.*\)"/\1/'; }
+        id=$$(field id "$$merchant")
+        secret=$$(field webhook_secret "$$merchant")
+        key=$$(field api_key "$$(curl -sS --fail-with-body -X POST \
+          "http://payment-gateway:8090/admin/v1/merchants/$$id/api-keys" -H "$$admin")")
+        [ -n "$$id" ] && [ -n "$$secret" ] && [ -n "$$key" ]
+        printf '%s' "$$secret" > /credentials/ecom.payments.gateway.webhook-secrets
+        printf '%s' "$$key" > /credentials/ecom.payments.gateway.api-key
+        echo "merchant $$id onboarded"
+
+  app:
+    depends_on:
+      gateway-onboarding:
+        condition: service_completed_successfully
+    environment:
+      ECOM_PAYMENTS_GATEWAY_BASE_URL: http://payment-gateway:8090
+      SPRING_CONFIG_IMPORT: optional:configtree:/run/gateway/
+    volumes:
+      - gateway-credentials:/run/gateway:ro
+
+volumes:
+  gateway-credentials:

@@ -53,7 +53,7 @@ class PaymentUpdates {
     /** Applies the payment to the locked record. */
     @Transactional(propagation = Propagation.MANDATORY)
     Applied apply(PaymentRecord locked, GatewayPayment payment, Correlation correlation) {
-        if (payment.version() <= locked.gatewayVersion()) {
+        if (!locked.isOlderThan(payment.version())) {
             return new Applied(locked, false);
         }
         PaymentRecord record = repository.applyStatus(locked.orderId(), payment.status(), payment.version(),
@@ -80,39 +80,44 @@ class PaymentUpdates {
             return;
         }
         UUID orderId = payment.get().orderId();
+        Correlation correlation = Correlation.start(orderId.toString());
         Optional<RefundRecord> known = repository.refundByGatewayId(refund.id())
                 .or(() -> sagaRefund(orderId, refund.merchantRefundId()));
-        RefundRecord record;
         if (known.isPresent()) {
-            record = known.get();
+            update(known.get(), refund, correlation);
         } else if (refund.initiatedBy() == GatewayRefund.Initiator.MERCHANT) {
             log.warn("Refund {} of order {} was not requested by this system", refund.id(), orderId);
-            return;
         } else {
             RefundReason reason = refund.initiatedBy() == GatewayRefund.Initiator.SYSTEM_LATE_SUCCESS
                     ? RefundReason.LATE_SUCCESS : null;
-            record = repository.insertGatewayRefund(Ids.newId(), orderId, refund, reason, clock.instant());
+            publishEnd(null, repository.insertGatewayRefund(Ids.newId(), orderId, refund, reason, clock.instant()),
+                    correlation);
         }
-        update(record, refund, Correlation.start(orderId.toString()));
     }
 
     /** Applies the refund to its record, if newer; publishes its end if it has a reason. Returns the record. */
     @Transactional(propagation = Propagation.MANDATORY)
     RefundRecord update(RefundRecord record, GatewayRefund refund, Correlation correlation) {
-        if (refund.version() <= record.gatewayVersion()) {
+        if (!record.isOlderThan(refund.version())) {
             return record;
         }
-        RefundRecord.Status status = RefundRecord.Status.of(refund.status());
-        RefundRecord updated = repository.updateRefund(record.id(), refund.id(), status, refund.version(),
-                clock.instant());
-        if (status.isFinal() && record.status() != status && updated.reason() != null) {
-            long sequence = repository.countChange(updated.orderId(), clock.instant());
-            Object event = status == RefundRecord.Status.SUCCEEDED
-                    ? new RefundSucceeded(updated.orderId(), updated.id(), updated.reason(), updated.amountPaise())
-                    : new RefundFailed(updated.orderId(), updated.id(), updated.reason(), updated.amountPaise());
-            messages.publish(event, new Origin(AGGREGATE, updated.orderId(), sequence), correlation);
-        }
+        RefundRecord updated = repository.updateRefund(record.id(), refund.id(), RefundRecord.Status.of(refund.status()),
+                refund.version(), clock.instant());
+        publishEnd(record.status(), updated, correlation);
         return updated;
+    }
+
+    /** {@code RefundSucceeded} or {@code RefundFailed} for a refund with a reason that has just ended. */
+    private void publishEnd(RefundRecord.Status before, RefundRecord refund, Correlation correlation) {
+        RefundRecord.Status status = refund.status();
+        if (!status.isFinal() || status == before || refund.reason() == null) {
+            return;
+        }
+        long sequence = repository.countChange(refund.orderId(), clock.instant());
+        Object event = status == RefundRecord.Status.SUCCEEDED
+                ? new RefundSucceeded(refund.orderId(), refund.id(), refund.reason(), refund.amountPaise())
+                : new RefundFailed(refund.orderId(), refund.id(), refund.reason(), refund.amountPaise());
+        messages.publish(event, new Origin(AGGREGATE, refund.orderId(), sequence), correlation);
     }
 
     /** The event that reports a final payment. */

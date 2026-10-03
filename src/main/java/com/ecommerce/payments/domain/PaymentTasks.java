@@ -114,15 +114,18 @@ class PaymentTasks {
             return;
         }
         Instant now = clock.instant();
-        Duration left = Duration.between(now, record.expiresAt());
-        if (now.isAfter(record.createdAt().plus(properties.creationBudget())) || left.compareTo(SHORTEST_PAYMENT) < 0) {
+        if (now.isAfter(record.createdAt().plus(properties.creationBudget()))
+                || Duration.between(now, record.expiresAt()).compareTo(SHORTEST_PAYMENT) < 0) {
             giveUp(record, correlation(task), "its creation budget is spent");
             return;
         }
         try {
             if (record.gatewayPaymentId() == null) {
+                // The same request on every retry: the gateway refuses another body under the same key. So the
+                // payment lasts as long as the window counted from the record, and ends at most the budget later.
+                Duration payable = Duration.between(record.createdAt(), record.expiresAt());
                 GatewayPayment payment = gateway.createPayment(new NewPayment(orderId, record.customerId(),
-                        record.amountPaise(), left), orderId + ":payment");
+                        record.amountPaise(), payable), orderId + ":payment");
                 record = inTransaction(() -> repository.gatewayCreated(orderId, payment, clock.instant()));
             }
             CheckoutSession session = gateway.createCheckoutSession(record.gatewayPaymentId(),

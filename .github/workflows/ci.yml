@@ -77,3 +77,45 @@ jobs:
       - name: Stop
         if: always()
         run: docker compose down --volumes
+
+  # The same stack with the real Payment Gateway, built at its pinned commit (LLD §7.11, §7.15).
+  ecosystem:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.ecosystem.yml
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start the stack with the Payment Gateway, and onboard this system as its merchant
+        run: docker compose up --build --detach
+      - name: Wait for readiness
+        run: |
+          for attempt in $(seq 1 90); do
+            if curl -fsS localhost:8081/actuator/health/readiness; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: Check that payments go to the gateway, not the fake
+        run: docker compose logs app | grep -q "Payments use the gateway at http://payment-gateway:8090"
+      - name: Wait for Keycloak
+        run: |
+          for attempt in $(seq 1 90); do
+            if curl -fsS -o /dev/null localhost:8180/realms/ecommerce/.well-known/openid-configuration; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+      - name: Phase 6 demo against the gateway (an unpaid payment cancelled there)
+        run: scripts/demo-orders.sh
+      - name: Phase 7 demo (hosted checkout, webhooks, refunds; the PSP's timeout, silence and decline)
+        run: scripts/demo-payments.sh
+      - name: Show logs
+        if: failure()
+        run: docker compose logs
+      - name: Stop
+        if: always()
+        run: docker compose down --volumes

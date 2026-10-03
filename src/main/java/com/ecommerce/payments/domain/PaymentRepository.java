@@ -79,8 +79,10 @@ class PaymentRepository {
     PaymentRecord gatewayCreated(UUID orderId, GatewayPayment payment, Instant now) {
         return update("""
                         gateway_payment_id = :gatewayPaymentId,
-                        status = CASE WHEN :gatewayVersion > gateway_version THEN :status ELSE status END,
-                        gateway_version = greatest(gateway_version, :gatewayVersion)""", orderId, now)
+                        status = CASE WHEN gateway_version IS NULL OR :gatewayVersion > gateway_version
+                                      THEN :status ELSE status END,
+                        gateway_version = CASE WHEN gateway_version IS NULL OR :gatewayVersion > gateway_version
+                                               THEN :gatewayVersion ELSE gateway_version END""", orderId, now)
                 .param("gatewayPaymentId", payment.id())
                 .param("status", payment.status().name())
                 .param("gatewayVersion", payment.version())
@@ -132,12 +134,14 @@ class PaymentRepository {
                 .update();
     }
 
-    /** Records a refund the gateway made on its own, before its status is applied. */
+    /** Records a refund the gateway made on its own, as it reported it. */
     RefundRecord insertGatewayRefund(UUID id, UUID orderId, GatewayRefund refund, RefundReason reason, Instant now) {
         return jdbc.sql("""
                         INSERT INTO payments.refunds (id, order_id, reason, amount_paise, initiated_by,
-                                                      gateway_refund_id, status, created_at, updated_at)
-                        VALUES (:id, :orderId, :reason, :amount, :initiatedBy, :gatewayRefundId, 'PENDING', :now, :now)
+                                                      gateway_refund_id, status, gateway_version, created_at,
+                                                      updated_at)
+                        VALUES (:id, :orderId, :reason, :amount, :initiatedBy, :gatewayRefundId, :status,
+                                :gatewayVersion, :now, :now)
                         RETURNING\s""" + REFUND_COLUMNS)
                 .param("id", id)
                 .param("orderId", orderId)
@@ -145,6 +149,8 @@ class PaymentRepository {
                 .param("amount", refund.amountPaise())
                 .param("initiatedBy", refund.initiatedBy().name())
                 .param("gatewayRefundId", refund.id())
+                .param("status", RefundRecord.Status.of(refund.status()).name())
+                .param("gatewayVersion", refund.version())
                 .param("now", utc(now))
                 .query(PaymentRepository::refund)
                 .single();
@@ -202,7 +208,7 @@ class PaymentRepository {
                 PaymentRecord.Creation.valueOf(row.getString("creation")),
                 row.getString("gateway_payment_id"),
                 status == null ? null : GatewayPayment.Status.valueOf(status),
-                row.getLong("gateway_version"),
+                row.getObject("gateway_version", Long.class),
                 row.getString("checkout_url"),
                 row.getBoolean("cancel_requested"),
                 row.getObject("created_at", OffsetDateTime.class).toInstant(),
@@ -219,7 +225,7 @@ class PaymentRepository {
                 GatewayRefund.Initiator.valueOf(row.getString("initiated_by")),
                 row.getString("gateway_refund_id"),
                 RefundRecord.Status.valueOf(row.getString("status")),
-                row.getLong("gateway_version"));
+                row.getObject("gateway_version", Long.class));
     }
 
     private static OffsetDateTime utc(Instant instant) {

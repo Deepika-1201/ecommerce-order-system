@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Grows with each module's schema. Phase 2 (platform), phase 3 (catalog, customer), phase 4 (cart, pricing), phase 5 (inventory), phase 6 (ordering, address snapshots, payment and shipment simulators) |
+| Status | Grows with each module's schema. Phase 2 (platform), phase 3 (catalog, customer), phase 4 (cart, pricing), phase 5 (inventory), phase 6 (ordering, address snapshots, the shipment simulator), phase 7 (payments, the webhook inbox) |
 | Decisions | [ADR-005](decisions/ADR-005-postgresql.md) (PostgreSQL, a schema per module), [ADR-008](decisions/ADR-008-transactional-outbox.md) (outbox), [ADR-009](decisions/ADR-009-inventory-reservation.md) (reservations), [ADR-010](decisions/ADR-010-idempotency.md) (idempotency), [ADR-021](decisions/ADR-021-stock-movements.md) (stock movements), [ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md) (simulators), [ADR-023](decisions/ADR-023-order-address-snapshots.md) (address snapshots) |
 
 ## 1. Conventions
@@ -25,6 +25,7 @@
 | `scheduled_tasks` | The in-process task scheduler ([LLD §2.7](low-level-design.md#27-tasks)) | `dedupe_key` unique while pending or running; `status`, `run_at`, `lease_until`, `attempts` | Finished tasks: 30 days |
 | `idempotency_keys` | API idempotency ([LLD §2.8](low-level-design.md#28-api-idempotency-keys)) | Primary key `scope` + `key`; `fingerprint`; stored response | Until `expires_at` (24 h) |
 | `audit_log` | Append-only record of staff and money actions | Actor, action, target, `details` (`jsonb`); a trigger rejects `UPDATE` and `DELETE` | Kept; monthly partitions later |
+| `webhook_inbox` (phase 7) | Verified webhooks, stored before they are acknowledged ([LLD §7.7](low-level-design.md#77-webhooks)) | Primary key `source` + `event_id`; `type`; the raw `body` as `text`, byte for byte; `received_at`, `processed_at` | Processed rows: 30 days |
 
 Indexes worth knowing:
 
@@ -138,14 +139,29 @@ erDiagram
 | `order_processes` | `order_id`, `step`, `cancel_reason`, `cancel_code`, `cancel_note`, `cancel_requested_at`, `hold_expires_at`, `deadline_at`, `attempts`, `refund_reason`, `version`, `created_at`, `updated_at` | Primary key and foreign key `order_id`; a deadline exactly while the step is not `DONE`; a cancellation's fields as its requester gives them (support's code, and a note with `OTHER`); `(deadline_at)` partial on steps other than `DONE`, for the sweep |
 
 - The order number comes from the sequence `order_numbers`; it is for display and never grants access.
+- `refund_status` is `REQUESTED`, `INITIATED`, `SUCCEEDED` or `FAILED` (the last two from phase 7, [LLD §7.9](low-level-design.md#79-the-saga)).
 - Address snapshots, the quote and the coupon live in other schemas, referenced by id without foreign keys.
 
-## 9. Simulators (phase 6, until phases 7 and 8)
+## 9. `payments` (phase 7)
+
+```mermaid
+erDiagram
+    payment_records ||--o{ refunds : "order_id"
+```
+
+| Table | Columns | Constraints and indexes |
+|---|---|---|
+| `payment_records` | `id`, `order_id`, `customer_id`, `amount_paise`, `expires_at`, `creation`, `gateway_payment_id`, `status`, `gateway_version`, `checkout_url`, `cancel_requested`, `version`, `created_at`, `updated_at` | `order_id` and `gateway_payment_id` unique; a gateway status exactly once the gateway has the payment; a checkout URL exactly when `CREATED` |
+| `refunds` | `id`, `order_id`, `reason`, `amount_paise`, `initiated_by`, `gateway_refund_id`, `status`, `gateway_version`, `created_at`, `updated_at` | `gateway_refund_id` unique; `REQUESTED` exactly until the gateway has the refund; the saga's refunds have a reason, the gateway's late-success refunds `LATE_SUCCESS`, its duplicate-success refunds none; `(order_id, reason)` unique for the saga's refunds |
+
+- The gateway remains the truth for money: a record changes only for a newer gateway `version` ([LLD §7.6](low-level-design.md#76-applying-the-gateways-state)).
+- Refunds change under their payment record's lock, and each change counts in the record's `version`, which orders what Payments publishes.
+- Phase 7 dropped the payment simulator's tables (`simulated_payments`, `simulated_refunds`).
+
+## 10. Simulators (phase 6, until phase 8)
 
 | Table | Columns | Constraints |
 |---|---|---|
-| `payments.simulated_payments` | `order_id`, `payment_id`, `amount_paise`, `status`, `expires_at`, `version`, `created_at`, `updated_at` | Primary key `order_id`; `payment_id` unique |
-| `payments.simulated_refunds` | `order_id`, `reason`, `refund_id`, `amount_paise`, `created_at` | Primary key `(order_id, reason)`: one refund per order and reason |
 | `fulfillment.simulated_shipments` | `order_id`, `status`, `version`, `created_at`, `updated_at` | Primary key `order_id` |
 
-Phases 7 and 8 drop these tables with the simulators ([ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md)).
+Phase 8 drops it with the shipment simulator ([ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md)).

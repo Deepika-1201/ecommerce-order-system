@@ -1501,7 +1501,7 @@ One per order, in `payments.payment_records`:
 | Customer, amount, expiry | From `CreatePayment` |
 | Creation | `CREATING` until the gateway has the payment and its checkout session, then `CREATED`; or `FAILED` |
 | Status | The gateway's, once created: `REQUIRES_PAYMENT_METHOD`, `REQUIRES_ACTION`, `PROCESSING`, `AUTHORIZED`, and the final `SUCCEEDED`, `FAILED`, `CANCELLED`, `EXPIRED` |
-| Gateway version | The last version applied (§7.6) |
+| Gateway version | The last version applied (§7.6); none until the gateway first reports one, since it counts from 0 |
 | Checkout URL | The session's |
 | Cancel requested | Set by `CancelPayment`, so that a refused cancel is sent again (S6) |
 | `version` | Counts the record's changes: the sequence of what Payments publishes (§2.3) |
@@ -1520,6 +1520,7 @@ Handlers run in the delivery transaction and never call the gateway (§2.7). Tas
 | `RefundPayment` | Inserts the refund (`REQUESTED`), once per order and reason, and schedules the task. A refund the gateway already has is answered at once | `payments.refund-payment` | `RefundInitiated`; `RefundSucceeded` or `RefundFailed` follow when it ends |
 
 - **Tasks are deduplicated per order and command** and retried with backoff, up to 10 attempts. A task that dies is replaced when the saga's deadline sends its command again (§6.7).
+- **A retried call sends the same request**, or the gateway refuses it as `422 idempotency_key_reuse`. The payment therefore lasts as long as its window counted from the record's creation, rather than from the call, and may end up to the creation budget later than the record says, well inside the hold.
 - **Any other refusal** (a refund of a payment that did not succeed, an id the gateway does not know) means a bug or a gateway that lost data. It is logged at `ERROR` and answered with nothing: the saga's deadline asks again, and alerts from the third attempt.
 
 ### 7.6 Applying the gateway's state
@@ -1555,6 +1556,7 @@ Everything Payments publishes comes from aggregate `payment`, keyed by the order
 
 - **At the deadline:** `CheckPayment` at the hold's expiry, and every 5 minutes while the payment is pending (§6.7).
 - **On return:** `POST /v1/me/orders/{id}/payment-check`, for the order's customer, answers `202` with the order. While the order waits for its payment, it sends `CheckPayment`; otherwise nothing changes. The checkout session's `return_url` is the storefront's order page, which calls it, so a slow webhook does not hold up the confirmation (A3, S14). Repeats are absorbed: one check task per order at a time.
+- **A pending answer moves the deadline only once the hold has expired** (amends §6.5, where `PaymentPending` always asked again in 5 minutes): the next check is at the later of the deadline and 5 minutes from now. Before the hold's expiry, as after a return poll, the payment is simply awaited; otherwise every early poll would bring the alerts of §6.7 forward.
 
 ### 7.9 The saga
 
@@ -1574,9 +1576,9 @@ Amends §6.5:
 
 The fake implements the port in memory when `ecom.payments.gateway.base-url` is unset: in tests, in `bootTestRun` and in the default compose stack. It logs a warning at startup.
 
-- **It keeps the gateway's rules this system depends on:** creation idempotent per key; cancel refused (`payment_invalid_state`) during an attempt and once final; refunds only of a succeeded payment, never beyond its amount; a version that grows with every change; an event for every change the gateway reports by webhook.
+- **It keeps the gateway's rules this system depends on:** creation idempotent per key, and another request under a used key refused; cancel refused (`payment_invalid_state`) during an attempt and once final; refunds only of a succeeded payment, never beyond its amount; versions that count from 0; an event for every change the gateway reports by webhook.
 - **Its events go through the same inbox and tasks as webhooks,** without HTTP or signatures, which the webhook tests cover.
-- **Tests drive it through `PaymentSimulator`:** `refuseCreation` and `timeOutCreation`; `startAttempt`, and `failAttempt`, which returns the payment to `requires_payment_method`; `succeed`, which on a final payment makes the late-success refund (`AUTO_REFUND`), and on a succeeded one the duplicate-success refund; `fail`, `expire`; `succeedRefund` and `failRefund`, which end the order's pending refund.
+- **Tests drive it through `PaymentSimulator`:** `refuseCreation`, `timeOutCreation`, `loseCreationAnswer` (the payment is created, the answer lost once) and `timeOutCheckout` (the payment is created, its session times out); `startAttempt`, and `failAttempt`, which returns the payment to `requires_payment_method`; `succeed`, which on a final payment makes the late-success refund (`AUTO_REFUND`, or with `acceptLateSuccess` the `ACCEPT` policy's success), and on a succeeded one the duplicate-success refund; `fail`, `expire`; `succeedRefund` and `failRefund`, which end the order's pending refund.
 - **A restart forgets its payments.** Their orders then wait for an operator, as with a payment the gateway lost (§7.5).
 
 ### 7.11 Ecosystem compose file
@@ -1637,7 +1639,7 @@ Orders show the refund's new statuses, `SUCCEEDED` and `FAILED`.
 `scripts/demo-payments.sh`, which a new CI job runs against the ecosystem stack. Each order's price picks a mock PSP scenario by its last two digits:
 
 1. **₹599.00:** asha orders, pays by card on the hosted checkout and approves on the mock PSP's page. The webhook confirms the order. She cancels it: the shipment is cancelled and the refund succeeds, so the order is `CANCELLED`, refund `SUCCEEDED`.
-2. **₹599.01:** the PSP times out but takes the money. The gateway's status checks find the success: `CONFIRMED`.
+2. **₹599.01:** the PSP times out but takes the money. Asha is back from the checkout, and her storefront asks for the payment's outcome (§7.8); the gateway's status checks find the success: `CONFIRMED`.
 3. **₹599.04:** pending, and the PSP never calls back. The gateway's polls find the success: `CONFIRMED`.
 4. **₹599.03:** declined. The payment could be tried again until it expires; asha cancels instead, the payment is cancelled, and the order is `CANCELLED`.
 5. A webhook with a forged signature gets `401`.

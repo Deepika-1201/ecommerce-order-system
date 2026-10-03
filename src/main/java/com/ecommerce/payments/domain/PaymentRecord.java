@@ -14,7 +14,7 @@ record PaymentRecord(
         Creation creation,
         String gatewayPaymentId,
         GatewayPayment.Status status,
-        long gatewayVersion,
+        Long gatewayVersion,
         String checkoutUrl,
         boolean cancelRequested,
         Instant createdAt,
@@ -29,5 +29,10 @@ record PaymentRecord(
 
     boolean isFinal() {
         return status != null && status.isFinal();
+    }
+
+    /** Whether the gateway's report is newer than what was applied; the gateway counts versions from 0. */
+    boolean isOlderThan(long reportedVersion) {
+        return gatewayVersion == null || reportedVersion > gatewayVersion;
     }
 }

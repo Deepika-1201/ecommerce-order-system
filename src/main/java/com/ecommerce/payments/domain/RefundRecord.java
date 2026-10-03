@@ -16,7 +16,12 @@ record RefundRecord(
         GatewayRefund.Initiator initiatedBy,
         String gatewayRefundId,
         Status status,
-        long gatewayVersion) {
+        Long gatewayVersion) {
+
+    /** Whether the gateway's report is newer than what was applied; the gateway counts versions from 0. */
+    boolean isOlderThan(long reportedVersion) {
+        return gatewayVersion == null || reportedVersion > gatewayVersion;
+    }
 
     enum Status {
         REQUESTED,

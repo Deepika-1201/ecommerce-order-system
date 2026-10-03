@@ -67,6 +67,20 @@ class PaymentTests extends OrderingTest {
     }
 
     @Test
+    void aCreationWhoseAnswerWasLostIsRetriedWithTheSameRequest() throws InterruptedException {
+        payments.loseCreationAnswer(orderId);
+        command(create(orderId, Duration.ofMinutes(15)));
+        assertThat(answers()).isEmpty();
+
+        Thread.sleep(1_100);   // a request that depended on the time would now differ, and be refused for its key
+        jdbc.sql("UPDATE platform.scheduled_tasks SET run_at = now() WHERE status = 'PENDING'").update();
+        settle();
+
+        assertThat(answers()).containsExactly("payments.payment-created");
+        assertThat(payment(orderId)).isEqualTo("REQUIRES_PAYMENT_METHOD");
+    }
+
+    @Test
     void aPaymentThatWouldLastLessThanAMinuteIsNotCreated() {
         command(create(orderId, Duration.ofSeconds(50)));
 

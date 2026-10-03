@@ -36,6 +36,14 @@ scripts/demo-inventory.sh # receipts and adjustments retried safely with Idempot
 scripts/demo-orders.sh    # an order placed and retried safely, followed to AWAITING_PAYMENT, cancelled; one rejected for stock
 ```
 
+Without the Payment Gateway, payments go to an in-memory fake that only tests drive. To run against the real gateway, built from [Payment-Orchestrator](https://github.com/Deepika-1201/Payment-Orchestrator) at a pinned commit with its mock PSPs, on `:8090` (Docker BuildKit needed):
+
+```bash
+export COMPOSE_FILE=docker-compose.yml:docker-compose.ecosystem.yml
+docker compose up --build --detach   # also onboards this system as the gateway's merchant, once
+scripts/demo-payments.sh  # pay on the hosted checkout, confirmed by webhook; cancel and refund; a PSP timeout, silence and decline
+```
+
 | User | Password | Role |
 |---|---|---|
 | `asha`, `ravi` | `asha-local-only`, `ravi-local-only` | `customer` |

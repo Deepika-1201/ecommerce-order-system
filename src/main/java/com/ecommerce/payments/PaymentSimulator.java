@@ -15,6 +15,9 @@ public interface PaymentSimulator {
     /** The gateway will time out whenever the order's payment is created, until the creation budget is spent. */
     void timeOutCreation(UUID orderId);
 
+    /** The gateway will create the order's payment but its answer is lost once, as after a read timeout (S15). */
+    void loseCreationAnswer(UUID orderId);
+
     /** The gateway will create the order's payment, but time out whenever its checkout session is created. */
     void timeOutCheckout(UUID orderId);
 
