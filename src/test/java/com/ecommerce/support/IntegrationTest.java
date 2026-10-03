@@ -32,12 +32,16 @@ import tools.jackson.databind.json.JsonMapper;
 @TestPropertySource(properties = {
     "ecom.workers.autostart=false",
     "spring.datasource.hikari.maximum-pool-size=10",
-    "spring.datasource.hikari.minimum-idle=1"
+    "spring.datasource.hikari.minimum-idle=1",
+    "ecom.payments.gateway.webhook-secrets=" + IntegrationTest.WEBHOOK_SECRET + "," + IntegrationTest.OLD_WEBHOOK_SECRET
 })
 @Import({IntegrationTest.RoleProbeController.class, IntegrationTest.RoleProbeAccess.class})
 public abstract class IntegrationTest {
 
     protected static final String API_PROBE = "/test/role-probe";
+    /** The gateway's webhook secrets in tests: the current one, and one still valid during a rotation. */
+    protected static final String WEBHOOK_SECRET = "whsec_test_current";
+    protected static final String OLD_WEBHOOK_SECRET = "whsec_test_previous";
 
     private static final JsonMapper JSON = JsonMapper.builder().build();
 

@@ -43,6 +43,10 @@ class OrderProcesses {
             log.info("Order {} in step {} ignored {} {}", orderId, step, message.type(), message.messageId());
             return;
         }
+        if (process.refundFailed()) {
+            log.error("order_refund_failed: order {}, {} refund of {} paise", orderId, process.refundReason(),
+                    process.refundAmountPaise());
+        }
         save(process, Correlation.causedBy(message));
     }
 

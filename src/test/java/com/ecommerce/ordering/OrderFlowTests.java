@@ -29,14 +29,14 @@ class OrderFlowTests extends OrderingTest {
 
         JsonNode awaiting = order(asha, orderId);
         assertThat(awaiting.get("status").asString()).isEqualTo("AWAITING_PAYMENT");
-        assertThat(awaiting.get("checkout_url").asString()).startsWith("https://checkout.simulator.invalid/pay/");
+        assertThat(awaiting.get("checkout_url").asString()).startsWith("https://fake-gateway.invalid/checkout/cs_");
         assertStock(sku, 5, 2);
         assertCoupon(couponId, 1, 0);
-        assertThat(payment(orderId)).isEqualTo("REQUIRES_PAYMENT");
+        assertThat(payment(orderId)).isEqualTo("REQUIRES_PAYMENT_METHOD");
         Instant holdExpiry = instant("SELECT expires_at FROM inventory.reservations WHERE order_id = :id", orderId);
         assertThat(Duration.between(Instant.now(), holdExpiry)).as("window, grace and margin")
                 .isBetween(Duration.ofMinutes(49), Duration.ofMinutes(50));
-        assertThat(instant("SELECT expires_at FROM payments.simulated_payments WHERE order_id = :id", orderId))
+        assertThat(instant("SELECT expires_at FROM payments.payment_records WHERE order_id = :id", orderId))
                 .as("the payment window ends before the grace and the margin")
                 .isEqualTo(holdExpiry.minus(Duration.ofMinutes(35)));
         assertThat(jdbc.sql("SELECT DISTINCT envelope::jsonb ->> 'correlation_id' FROM platform.outbox "

@@ -53,13 +53,11 @@ class DeadlineTests extends OrderingTest {
     }
 
     @Test
-    void aPaymentLeftUnpaidIsExpiredWhenTheHoldExpires() {
+    void aPaymentWhoseExpiryWasMissedIsFoundExpiredWhenTheHoldExpires() {
         String sku = product("Steel bottle", 59_900, 5);
         UUID orderId = awaitingPayment(sku, 1);
-        jdbc.sql("UPDATE payments.simulated_payments SET expires_at = :past WHERE order_id = :id")
-                .param("past", OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(1))
-                .param("id", orderId)
-                .update();
+        payments.expire(orderId);
+        jdbc.sql("DELETE FROM platform.scheduled_tasks WHERE type = 'payments.apply-gateway-event'").update();
 
         deadlinePasses(orderId);
 

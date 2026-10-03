@@ -25,6 +25,7 @@ val s3proxyVersion = "4.1.1"
 val embeddedPostgresVersion = "2.2.2"
 val embeddedPostgresBinariesVersion = "17.11.0"
 val archunitVersion = "1.5.1"
+val jsonSchemaValidatorVersion = "3.0.6"
 
 dependencyManagement {
     imports {
@@ -69,6 +70,8 @@ dependencies {
     testImplementation("io.zonky.test.postgres:embedded-postgres-binaries-linux-arm64v8")
     testImplementation("com.tngtech.archunit:archunit-junit5:$archunitVersion")
     testImplementation("net.jqwik:jqwik:$jqwikVersion")
+    // Contract tests validate the gateway adapter's JSON against the gateway's OpenAPI 3.1 document (LLD §7.16).
+    testImplementation("com.networknt:json-schema-validator:$jsonSchemaValidatorVersion")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

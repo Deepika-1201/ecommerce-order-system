@@ -9,5 +9,6 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 public record CleanupProperties(
         @DefaultValue("7d") Duration deliveredMessages,
         @DefaultValue("30d") Duration processedMessages,
-        @DefaultValue("30d") Duration finishedTasks) {
+        @DefaultValue("30d") Duration finishedTasks,
+        @DefaultValue("30d") Duration processedWebhooks) {
 }

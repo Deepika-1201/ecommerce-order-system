@@ -28,9 +28,11 @@ import com.ecommerce.payments.PaymentMessages.PaymentExpired;
 import com.ecommerce.payments.PaymentMessages.PaymentFailed;
 import com.ecommerce.payments.PaymentMessages.PaymentPending;
 import com.ecommerce.payments.PaymentMessages.PaymentSucceeded;
+import com.ecommerce.payments.PaymentMessages.RefundFailed;
 import com.ecommerce.payments.PaymentMessages.RefundInitiated;
 import com.ecommerce.payments.PaymentMessages.RefundPayment;
 import com.ecommerce.payments.PaymentMessages.RefundReason;
+import com.ecommerce.payments.PaymentMessages.RefundSucceeded;
 import com.ecommerce.pricing.CouponMessages.CommitCoupon;
 import com.ecommerce.pricing.CouponMessages.CouponReserved;
 import com.ecommerce.pricing.CouponMessages.CouponUnavailable;
@@ -90,6 +92,7 @@ final class OrderProcess {
     private final List<Object> commands = new ArrayList<>();
     private boolean changed;
     private boolean overdue;
+    private boolean refundFailed;
 
     OrderProcess(OrderFacts order, ProcessState state, OrderingProperties settings) {
         this.order = order;
@@ -118,8 +121,16 @@ final class OrderProcess {
         return process;
     }
 
-    /** Applies a participant's reply or event, as the step's row of LLD §6.5 says. */
+    /** Applies a participant's reply or event, as the step's row of LLD §6.5 says, and §7.9 for refunds' ends. */
     void decide(Object message, Instant now) {
+        switch (message) {
+            case RefundSucceeded ended -> refundEnded(ended.reason(), ended.amountPaise(), true, now);
+            case RefundFailed ended -> refundEnded(ended.reason(), ended.amountPaise(), false, now);
+            default -> decideInStep(message, now);
+        }
+    }
+
+    private void decideInStep(Object message, Instant now) {
         switch (step) {
             case RESERVING_STOCK -> reservingStock(message, now);
             case RESERVING_COUPON -> reservingCoupon(message, now);
@@ -181,6 +192,18 @@ final class OrderProcess {
         }
         deadlineAt = now.plus(timeout(step));
         changed = true;
+    }
+
+    /**
+     * The customer is back from the hosted checkout (LLD §7.8): while the order waits for its payment, ask for the
+     * outcome now rather than at the deadline. Returns whether it asked.
+     */
+    boolean requestPaymentCheck() {
+        if (step != Step.AWAITING_PAYMENT && step != Step.AWAITING_PAYMENT_OUTCOME) {
+            return false;
+        }
+        send(new CheckPayment(orderId()));
+        return true;
     }
 
     private void reservingStock(Object message, Instant now) {
@@ -405,6 +428,27 @@ final class OrderProcess {
         }
     }
 
+    /**
+     * A refund ended (LLD §7.9). The order's own refund ends, and with it a {@code REFUNDING} step; once ended, it stays
+     * so. An order without a refund records the gateway's late-success refund (S13, FR-PAY5) whatever its step. A
+     * failed refund raises an alert (S18).
+     */
+    private void refundEnded(RefundReason why, long amountPaise, boolean succeeded, Instant now) {
+        if (refundReason == null && why == RefundReason.LATE_SUCCESS) {
+            refundReason = why;
+            refundAmountPaise = amountPaise;
+        } else if (why != refundReason || refundStatus == RefundStatus.SUCCEEDED
+                || refundStatus == RefundStatus.FAILED) {
+            return;
+        }
+        refundStatus = succeeded ? RefundStatus.SUCCEEDED : RefundStatus.FAILED;
+        refundFailed = !succeeded;
+        changed = true;
+        if (step == Step.REFUNDING) {
+            enter(Step.DONE, now);
+        }
+    }
+
     /** Undoes what a late reply did elsewhere (LLD §6.5): money taken from an unpaid order, a use held for nothing. */
     private void done(Object message, Instant now) {
         switch (message) {
@@ -461,9 +505,16 @@ final class OrderProcess {
         enter(Step.REFUNDING, now);
     }
 
+    /**
+     * A pending payment is asked about again in 5 minutes, unless the deadline already comes later: before the hold's
+     * expiry, as after the customer's return poll (LLD §7.8), the payment is simply awaited.
+     */
     private void checkAgainLater(Instant now) {
-        deadlineAt = now.plus(RECHECK_INTERVAL);
-        changed = true;
+        Instant next = now.plus(RECHECK_INTERVAL);
+        if (deadlineAt == null || next.isAfter(deadlineAt)) {
+            deadlineAt = next;
+            changed = true;
+        }
     }
 
     /** Moves to the step, with its deadline; a step that waits for a command's reply sends the command. */
@@ -497,8 +548,8 @@ final class OrderProcess {
         return switch (step) {
             case RESERVING_STOCK -> new ReserveStock(orderId, order.lines(), settings.hold());
             case RESERVING_COUPON -> new ReserveCoupon(orderId, order.couponId(), order.customerId());
-            case CREATING_PAYMENT ->
-                    new CreatePayment(orderId, order.grandTotalPaise(), settings.paymentExpiry(holdExpiresAt));
+            case CREATING_PAYMENT -> new CreatePayment(orderId, order.customerId(), order.grandTotalPaise(),
+                    settings.paymentExpiry(holdExpiresAt));
             case AWAITING_PAYMENT, AWAITING_PAYMENT_OUTCOME -> new CheckPayment(orderId);
             case COMMITTING_STOCK -> new CommitReservation(orderId);
             case CANCELLING_PAYMENT -> new CancelPayment(orderId);
@@ -558,6 +609,19 @@ final class OrderProcess {
     /** Whether the deadline that just passed should raise an alert (LLD §6.7). */
     boolean overdue() {
         return overdue;
+    }
+
+    /** Whether the last input reported a failed refund, which needs a person (S18). */
+    boolean refundFailed() {
+        return refundFailed;
+    }
+
+    RefundReason refundReason() {
+        return refundReason;
+    }
+
+    Long refundAmountPaise() {
+        return refundAmountPaise;
     }
 
     /** The commands to publish, in order, with the change. */

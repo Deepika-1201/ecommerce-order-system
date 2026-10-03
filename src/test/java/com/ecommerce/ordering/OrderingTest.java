@@ -32,9 +32,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.databind.JsonNode;
 
 /**
- * Orders through the public API, with the real Inventory and Pricing and the simulated Payments and Fulfillment
- * (ADR-022). Each test starts with empty stores and new customers; worker loops are stopped, so tests deliver the
- * outbox's messages on their own thread.
+ * Orders through the public API, with the real Inventory, Pricing and Payments (against the fake gateway, LLD §7.10)
+ * and the simulated Fulfillment (ADR-022). Each test starts with empty stores and new customers; worker loops are
+ * stopped, so tests deliver the outbox's messages and run due tasks on their own thread.
  */
 public abstract class OrderingTest extends IntegrationTest {
 
@@ -77,7 +77,7 @@ public abstract class OrderingTest extends IntegrationTest {
     void emptyStores() {
         jdbc.sql("""
                 TRUNCATE ordering.order_processes, ordering.order_lines, ordering.orders,
-                         payments.simulated_refunds, payments.simulated_payments, fulfillment.simulated_shipments,
+                         payments.refunds, payments.payment_records, fulfillment.simulated_shipments,
                          inventory.reservation_lines, inventory.reservations, inventory.stock_movements,
                          inventory.stock_items, cart.cart_lines, cart.carts, pricing.quote_lines, pricing.quotes,
                          pricing.coupon_redemptions, pricing.coupons, catalog.product_images, catalog.variants,
@@ -179,14 +179,20 @@ public abstract class OrderingTest extends IntegrationTest {
         return "key-" + ++keys + "-" + UUID.randomUUID();
     }
 
-    // Messages and deadlines.
+    // Messages, tasks and deadlines.
 
+    /** Delivers due messages and runs due tasks, as the worker loops would, until neither has anything left. */
     protected void deliver() {
-        DueMessages.deliverAll(context);
+        deliverExcept();
     }
 
+    /** As {@link #deliver}, leaving every message of these payload types in the outbox. */
     protected void deliverExcept(Class<?>... heldBack) {
-        DueMessages.deliverAllExcept(context, heldBack);
+        for (int round = 1; DueMessages.deliverAllExcept(context, heldBack) + DueTasks.runAll(context) > 0; round++) {
+            if (round > 100) {
+                throw new AssertionError("Messages and tasks kept coming: more than 100 rounds");
+            }
+        }
     }
 
     /** Publishes a message as {@code aggregateType} would: a duplicate, or a reply to a command sent again. */
@@ -252,17 +258,21 @@ public abstract class OrderingTest extends IntegrationTest {
         return column("SELECT status FROM pricing.coupon_redemptions WHERE order_id = :id", orderId);
     }
 
+    /** What Payments knows of the order's payment: the gateway's status once created, else how its creation stands. */
     protected String payment(UUID orderId) {
-        return column("SELECT status FROM payments.simulated_payments WHERE order_id = :id", orderId);
+        return column("""
+                SELECT CASE WHEN creation = 'FAILED' THEN 'CREATION_FAILED' ELSE coalesce(status, creation) END
+                FROM payments.payment_records WHERE order_id = :id
+                """, orderId);
     }
 
     protected String shipment(UUID orderId) {
         return column("SELECT status FROM fulfillment.simulated_shipments WHERE order_id = :id", orderId);
     }
 
-    /** The order's refunds: reason to amount. */
+    /** The order's refunds that have a reason: reason to amount. */
     protected Map<String, Long> refunds(UUID orderId) {
-        return jdbc.sql("SELECT reason, amount_paise FROM payments.simulated_refunds WHERE order_id = :id")
+        return jdbc.sql("SELECT reason, amount_paise FROM payments.refunds WHERE order_id = :id AND reason IS NOT NULL")
                 .param("id", orderId)
                 .query((row, n) -> Map.entry(row.getString("reason"), row.getLong("amount_paise")))
                 .list()

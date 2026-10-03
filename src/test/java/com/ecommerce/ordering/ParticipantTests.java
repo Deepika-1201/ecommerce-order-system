@@ -32,9 +32,11 @@ import com.ecommerce.payments.PaymentMessages.PaymentExpired;
 import com.ecommerce.payments.PaymentMessages.PaymentFailed;
 import com.ecommerce.payments.PaymentMessages.PaymentPending;
 import com.ecommerce.payments.PaymentMessages.PaymentSucceeded;
+import com.ecommerce.payments.PaymentMessages.RefundFailed;
 import com.ecommerce.payments.PaymentMessages.RefundInitiated;
 import com.ecommerce.payments.PaymentMessages.RefundPayment;
 import com.ecommerce.payments.PaymentMessages.RefundReason;
+import com.ecommerce.payments.PaymentMessages.RefundSucceeded;
 import com.ecommerce.platform.tasks.DueTasks;
 import com.ecommerce.pricing.CouponMessages.CommitCoupon;
 import com.ecommerce.pricing.CouponMessages.CouponReserved;
@@ -52,19 +54,22 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * The participants as the saga sees them (LLD §6.2, §6.8): each command, sent through the outbox, is answered as the
- * contract says, and a repeat is answered the same. Replies stay in the outbox, where these tests read them.
+ * The participants as the saga sees them (LLD §6.2, §6.8, §7.5): each command, sent through the outbox, is answered as
+ * the contract says, and a repeat is answered the same. Replies stay in the outbox, where these tests read them;
+ * Payments' answers come from its tasks, against the fake gateway.
  */
 class ParticipantTests extends OrderingTest {
 
     private static final Duration HOLD = Duration.ofMinutes(50);
+    private static final UUID CUSTOMER = UUID.randomUUID();
     private static final JsonMapper JSON = JsonMapper.builder().build();
     private static final Class<?>[] REPLIES = {StockReserved.class, StockReservationFailed.class,
         ReservationCommitted.class, ReservationLost.class, CouponReserved.class, CouponUnavailable.class,
         PaymentCreated.class, PaymentCreationFailed.class, PaymentCancelled.class, PaymentCancelRefused.class,
-        PaymentPending.class, RefundInitiated.class, PaymentSucceeded.class, PaymentFailed.class,
-        PaymentExpired.class, ShipmentCancelled.class, ShipmentCancelRefused.class, ShipmentHandedOver.class,
-        ShipmentDelivered.class, ShipmentReturnInitiated.class, ShipmentReturnedToOrigin.class};
+        PaymentPending.class, RefundInitiated.class, RefundSucceeded.class, RefundFailed.class, PaymentSucceeded.class,
+        PaymentFailed.class, PaymentExpired.class, ShipmentCancelled.class, ShipmentCancelRefused.class,
+        ShipmentHandedOver.class, ShipmentDelivered.class, ShipmentReturnInitiated.class,
+        ShipmentReturnedToOrigin.class};
 
     private final UUID orderId = UUID.randomUUID();
 
@@ -173,18 +178,19 @@ class ParticipantTests extends OrderingTest {
 
     @Test
     void creatingAPaymentAnswersWithItsCheckoutPageOncePerOrder() {
-        command(new CreatePayment(orderId, 123_400, Instant.now().plus(Duration.ofMinutes(15))));
-        command(new CreatePayment(orderId, 123_400, Instant.now().plus(Duration.ofMinutes(15))));
+        command(new CreatePayment(orderId, CUSTOMER, 123_400, Instant.now().plus(Duration.ofMinutes(15))));
+        command(new CreatePayment(orderId, CUSTOMER, 123_400, Instant.now().plus(Duration.ofMinutes(15))));
 
         List<Reply> replies = replies();
         assertThat(replies).extracting(Reply::type)
                 .containsExactly("payments.payment-created", "payments.payment-created");
         assertThat(replies.get(1).data()).isEqualTo(replies.get(0).data());
-        String paymentId = replies.getFirst().data().get("payment_id").asString();
+        assertThat(replies.getFirst().data().get("payment_id").asString())
+                .isEqualTo(column("SELECT id::text FROM payments.payment_records WHERE order_id = :id"));
         assertThat(replies.getFirst().data().get("checkout_url").asString())
-                .isEqualTo("https://checkout.simulator.invalid/pay/" + paymentId);
+                .startsWith("https://fake-gateway.invalid/checkout/cs_");
         assertThat(replies.getFirst().aggregateType()).isEqualTo("payment");
-        assertThat(payment(orderId)).isEqualTo("REQUIRES_PAYMENT");
+        assertThat(payment(orderId)).isEqualTo("REQUIRES_PAYMENT_METHOD");
     }
 
     @Test
@@ -192,11 +198,12 @@ class ParticipantTests extends OrderingTest {
         payments.refuseCreation(orderId);
         payments.refuseCreation(orderId);
 
-        command(new CreatePayment(orderId, 123_400, Instant.now().plus(Duration.ofMinutes(15))));
-        command(new CreatePayment(orderId, 123_400, Instant.now().plus(Duration.ofMinutes(15))));
+        command(new CreatePayment(orderId, CUSTOMER, 123_400, Instant.now().plus(Duration.ofMinutes(15))));
+        command(new CreatePayment(orderId, CUSTOMER, 123_400, Instant.now().plus(Duration.ofMinutes(15))));
 
         assertThat(replies()).extracting(Reply::type)
                 .containsExactly("payments.payment-creation-failed", "payments.payment-creation-failed");
+        assertThat(payment(orderId)).isEqualTo("CREATION_FAILED");
         UUID created = createdPayment();
         assertThatThrownBy(() -> payments.refuseCreation(created)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> payments.succeed(orderId)).isInstanceOf(IllegalStateException.class);
@@ -221,8 +228,9 @@ class ParticipantTests extends OrderingTest {
         assertThat(replies(unpaid)).extracting(Reply::type).containsExactly("payments.payment-created",
                 "payments.payment-cancelled", "payments.payment-cancelled");
         assertThat(payment(unpaid)).isEqualTo("CANCELLED");
-        assertThat(lastReply(paying)).isEqualTo("payments.payment-cancel-refused");
-        assertThat(lastReply(paid)).isEqualTo("payments.payment-cancel-refused");
+        assertThat(lastReply(paying)).as("an attempt in flight").isEqualTo("payments.payment-cancel-refused");
+        assertThat(lastReply(paid)).as("a final payment answers with its outcome")
+                .isEqualTo("payments.payment-succeeded");
         assertThat(lastReply(failed)).isEqualTo("payments.payment-failed");
         assertThat(lastReply(expired)).isEqualTo("payments.payment-expired");
         assertThat(payment(paying)).isEqualTo("PROCESSING");
@@ -230,35 +238,47 @@ class ParticipantTests extends OrderingTest {
     }
 
     @Test
-    void checkingAPaymentAnswersPendingOrItsOutcomeAndExpiresItWhenItsTimeIsUp() {
+    void checkingAPaymentAnswersPendingOrItsOutcome() {
         UUID payable = createdPayment();
-        UUID overdue = createdPayment(Instant.now().minusSeconds(1));
-        UUID paying = createdPayment(Instant.now().minusSeconds(1));
+        UUID paying = createdPayment();
         payments.startAttempt(paying);
         UUID paid = createdPayment();
         payments.succeed(paid);
+        UUID expired = createdPayment();
+        payments.expire(expired);
 
-        for (UUID order : List.of(payable, overdue, paying, paid)) {
+        for (UUID order : List.of(payable, paying, paid, expired)) {
             command(new CheckPayment(order), order);
         }
 
         assertThat(lastReply(payable)).isEqualTo("payments.payment-pending");
-        assertThat(lastReply(overdue)).isEqualTo("payments.payment-expired");
-        assertThat(payment(overdue)).isEqualTo("EXPIRED");
         assertThat(lastReply(paying)).as("an attempt in flight").isEqualTo("payments.payment-pending");
         Reply succeeded = replies(paid).getLast();
         assertThat(succeeded.type()).isEqualTo("payments.payment-succeeded");
         assertThat(succeeded.data().get("amount_paise").asLong()).isEqualTo(123_400);
+        assertThat(lastReply(expired)).isEqualTo("payments.payment-expired");
+    }
+
+    @Test
+    void aCheckFindsTheOutcomeOfAWebhookThatNeverCame() {
+        UUID paid = createdPayment();
+        payments.succeed(paid);
+        jdbc.sql("DELETE FROM platform.scheduled_tasks WHERE type = 'payments.apply-gateway-event'").update();
+
+        command(new CheckPayment(paid), paid);
+
+        assertThat(replies(paid)).extracting(Reply::type)
+                .containsExactly("payments.payment-created", "payments.payment-succeeded");
+        assertThat(payment(paid)).isEqualTo("SUCCEEDED");
     }
 
     @Test
     void refundsAreOnePerOrderAndReason() {
-        UUID paid = createdPayment();
-        payments.succeed(paid);
+        UUID paid = paidPayment();
 
-        command(new RefundPayment(paid, 123_400, RefundReason.ORDER_CANCELLED), paid);
-        command(new RefundPayment(paid, 123_400, RefundReason.ORDER_CANCELLED), paid);
-        command(new RefundPayment(paid, 123_400, RefundReason.LATE_SUCCESS), paid);
+        command(new RefundPayment(paid, 100_000, RefundReason.ORDER_CANCELLED), paid);
+        command(new RefundPayment(paid, 100_000, RefundReason.ORDER_CANCELLED), paid);
+        command(new RefundPayment(paid, 23_400, RefundReason.LATE_SUCCESS), paid);
 
         List<JsonNode> refunds = replies(paid).stream()
                 .filter(reply -> reply.type().equals("payments.refund-initiated"))
@@ -268,8 +288,26 @@ class ParticipantTests extends OrderingTest {
         assertThat(refunds.get(1)).isEqualTo(refunds.get(0));
         assertThat(refunds.get(2).get("refund_id")).isNotEqualTo(refunds.get(0).get("refund_id"));
         assertThat(refunds.get(0).get("reason").asString()).isEqualTo("ORDER_CANCELLED");
-        assertThat(refunds.get(0).get("amount_paise").asLong()).isEqualTo(123_400);
+        assertThat(refunds.get(0).get("amount_paise").asLong()).isEqualTo(100_000);
         assertThat(refunds(paid)).containsOnlyKeys("ORDER_CANCELLED", "LATE_SUCCESS");
+    }
+
+    @Test
+    void aRefundEndsByTheGatewaysEvent() {
+        UUID refunded = paidPayment();
+        command(new RefundPayment(refunded, 123_400, RefundReason.ORDER_CANCELLED), refunded);
+        UUID unlucky = paidPayment();
+        command(new RefundPayment(unlucky, 123_400, RefundReason.RETURNED_TO_ORIGIN), unlucky);
+
+        payments.succeedRefund(refunded);
+        payments.failRefund(unlucky);
+        deliverExcept(REPLIES);
+
+        Reply succeeded = replies(refunded).getLast();
+        assertThat(succeeded.type()).isEqualTo("payments.refund-succeeded");
+        assertThat(succeeded.data().get("reason").asString()).isEqualTo("ORDER_CANCELLED");
+        assertThat(succeeded.data().get("amount_paise").asLong()).isEqualTo(123_400);
+        assertThat(lastReply(unlucky)).isEqualTo("payments.refund-failed");
     }
 
     @Test
@@ -283,7 +321,7 @@ class ParticipantTests extends OrderingTest {
     }
 
     @Test
-    void thePaymentSimulatorRefusesWhatAPaymentsStatusDoesNotAllow() {
+    void theFakeGatewayRefusesWhatAPaymentsStatusDoesNotAllow() {
         UUID cancelled = createdPayment();
         command(new CancelPayment(cancelled), cancelled);
         UUID paid = createdPayment();
@@ -291,10 +329,12 @@ class ParticipantTests extends OrderingTest {
         UUID paying = createdPayment();
         payments.startAttempt(paying);
 
-        assertThatThrownBy(() -> payments.succeed(cancelled)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> payments.fail(cancelled)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> payments.fail(paid)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> payments.expire(paid)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> payments.startAttempt(paying)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> payments.failAttempt(paid)).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> payments.succeedRefund(paid)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> payments.succeed(UUID.randomUUID())).isInstanceOf(IllegalStateException.class);
         assertThat(payment(paid)).isEqualTo("SUCCEEDED");
     }
@@ -347,13 +387,21 @@ class ParticipantTests extends OrderingTest {
 
     /** A payment of ₹1,234 for a new order, payable for 15 minutes; the order's id. */
     private UUID createdPayment() {
-        return createdPayment(Instant.now().plus(Duration.ofMinutes(15)));
+        UUID order = UUID.randomUUID();
+        command(new CreatePayment(order, CUSTOMER, 123_400, Instant.now().plus(Duration.ofMinutes(15))), order);
+        return order;
     }
 
-    private UUID createdPayment(Instant expiresAt) {
-        UUID order = UUID.randomUUID();
-        command(new CreatePayment(order, 123_400, expiresAt), order);
+    /** A payment that succeeded, with the gateway's event applied, as before the saga asks for a refund. */
+    private UUID paidPayment() {
+        UUID order = createdPayment();
+        payments.succeed(order);
+        deliverExcept(REPLIES);
         return order;
+    }
+
+    private String column(String sql) {
+        return jdbc.sql(sql).param("id", orderId).query(String.class).single();
     }
 
     private void command(Object command) {

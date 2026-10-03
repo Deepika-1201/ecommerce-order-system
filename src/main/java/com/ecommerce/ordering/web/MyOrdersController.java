@@ -108,4 +108,14 @@ class MyOrdersController {
                 () -> ResponseEntity.accepted()
                         .body(OrderResponse.forCustomer(orders.cancelForCustomer(caller, id), storage)));
     }
+
+    @Operation(summary = "Check the payment now, on returning from the hosted checkout, rather than waiting for the "
+            + "gateway's webhook; repeats are harmless")
+    @ApiResponse(responseCode = "202", description = "The order; it moves on once the payment's outcome is known",
+            content = @Content(schema = @Schema(implementation = OrderResponse.class)))
+    @PostMapping("/{id}/payment-check")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    OrderResponse checkMyPayment(Caller caller, @PathVariable UUID id) {
+        return OrderResponse.forCustomer(orders.checkPayment(caller, id), storage);
+    }
 }

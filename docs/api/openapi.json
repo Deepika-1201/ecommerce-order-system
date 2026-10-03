@@ -796,7 +796,7 @@
             "type" : "integer"
           },
           "status" : {
-            "enum" : [ "REQUESTED", "INITIATED" ],
+            "enum" : [ "REQUESTED", "INITIATED", "SUCCEEDED", "FAILED" ],
             "type" : "string"
           }
         }
@@ -3208,6 +3208,37 @@
         "tags" : [ "My orders" ]
       }
     },
+    "/v1/me/orders/{id}/payment-check" : {
+      "post" : {
+        "operationId" : "checkMyPayment",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "202" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/OrderResponse"
+                }
+              }
+            },
+            "description" : "The order; it moves on once the payment's outcome is known"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Check the payment now, on returning from the hosted checkout, rather than waiting for the gateway's webhook; repeats are harmless",
+        "tags" : [ "My orders" ]
+      }
+    },
     "/v1/products" : {
       "get" : {
         "operationId" : "browseProducts",
@@ -3603,6 +3634,38 @@
         "summary" : "Receive units (1-100,000); the first receipt of a SKU creates its stock item",
         "tags" : [ "Warehouse" ]
       }
+    },
+    "/v1/webhooks/payment-gateway" : {
+      "post" : {
+        "operationId" : "receiveGatewayEvent",
+        "parameters" : [ {
+          "description" : "t=<unix seconds>,v1=<hex HMAC-SHA256 of t.body>; one v1 per valid secret",
+          "in" : "header",
+          "name" : "PG-Signature",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "object"
+              }
+            }
+          },
+          "description" : "The gateway's event, as it signed it",
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "Stored, or already known"
+          }
+        },
+        "summary" : "Receive a payment or refund event from the gateway; a known event id changes nothing",
+        "tags" : [ "Webhooks" ]
+      }
     }
   },
   "servers" : [ {
@@ -3612,6 +3675,9 @@
   "tags" : [ {
     "description" : "Role admin. Product responses carry the version as ETag.",
     "name" : "Catalog administration"
+  }, {
+    "description" : "Events from the Payment Gateway, signed with PG-Signature",
+    "name" : "Webhooks"
   }, {
     "description" : "Role support. Any order, as its customer sees it plus the customer id; cancellations take a reason code and an Idempotency-Key, and are audit-logged.",
     "name" : "Support"

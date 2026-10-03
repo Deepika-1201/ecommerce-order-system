@@ -119,6 +119,22 @@ public class OrderService {
         return view(orders.find(orderId).orElseThrow());
     }
 
+    /**
+     * The customer is back from the hosted checkout (LLD §7.8): while the order waits for its payment, Payments is
+     * asked for the outcome now; otherwise nothing changes.
+     */
+    @Transactional
+    public OrderView checkPayment(Caller caller, UUID orderId) {
+        UUID customerId = customers.idOf(caller);
+        OrderProcess process = orders.lockProcess(orderId, settings)
+                .filter(found -> found.customerId().equals(customerId))
+                .orElseThrow(OrderService::notFound);
+        if (process.requestPaymentCheck()) {
+            processes.save(process, Correlation.start(orderId.toString()));
+        }
+        return view(orders.find(orderId).orElseThrow());
+    }
+
     @Transactional
     public OrderView customerOrder(Caller caller, UUID orderId) {
         UUID customerId = customers.idOf(caller);

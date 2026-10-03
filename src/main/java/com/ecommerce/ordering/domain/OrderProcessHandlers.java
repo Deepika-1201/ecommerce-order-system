@@ -18,7 +18,9 @@ import com.ecommerce.payments.PaymentMessages.PaymentExpired;
 import com.ecommerce.payments.PaymentMessages.PaymentFailed;
 import com.ecommerce.payments.PaymentMessages.PaymentPending;
 import com.ecommerce.payments.PaymentMessages.PaymentSucceeded;
+import com.ecommerce.payments.PaymentMessages.RefundFailed;
 import com.ecommerce.payments.PaymentMessages.RefundInitiated;
+import com.ecommerce.payments.PaymentMessages.RefundSucceeded;
 import com.ecommerce.platform.HandlesMessage;
 import com.ecommerce.platform.IncomingMessage;
 import com.ecommerce.pricing.CouponMessages.CouponReserved;
@@ -26,8 +28,8 @@ import com.ecommerce.pricing.CouponMessages.CouponUnavailable;
 import org.springframework.stereotype.Component;
 
 /**
- * Every reply and event the order process consumes (LLD §6.2), one consumer per type. The outbox orders messages per
- * consumer, never across types, so the process decides what each means in every step.
+ * Every reply and event the order process consumes (LLD §6.2, §7.2), one consumer per type. The outbox orders messages
+ * per consumer, never across types, so the process decides what each means in every step.
  */
 @Component
 class OrderProcessHandlers {
@@ -110,6 +112,16 @@ class OrderProcessHandlers {
 
     @HandlesMessage(consumer = "ordering.refund-initiated")
     void refundInitiated(IncomingMessage<RefundInitiated> message) {
+        processes.handle(message.payload().orderId(), message);
+    }
+
+    @HandlesMessage(consumer = "ordering.refund-succeeded")
+    void refundSucceeded(IncomingMessage<RefundSucceeded> message) {
+        processes.handle(message.payload().orderId(), message);
+    }
+
+    @HandlesMessage(consumer = "ordering.refund-failed")
+    void refundFailed(IncomingMessage<RefundFailed> message) {
         processes.handle(message.payload().orderId(), message);
     }
 

@@ -5,8 +5,9 @@ import java.time.Instant;
 import java.util.UUID;
 
 /**
- * The order saga's commands to Payments, Payments' replies, and the payment events the saga consumes (LLD §6.2).
- * Replies and events come from aggregate {@code payment}, keyed by the order id, with the payment's version.
+ * The order saga's commands to Payments, Payments' replies, and the payment and refund events the saga consumes
+ * (LLD §6.2, §7.2). Replies and events come from aggregate {@code payment}, keyed by the order id, with the payment
+ * record's version.
  */
 public final class PaymentMessages {
 
@@ -22,9 +23,12 @@ public final class PaymentMessages {
         LATE_SUCCESS
     }
 
-    /** One payment per order, payable until {@code expiresAt}: {@link PaymentCreated} or a failure. */
+    /**
+     * One payment per order, payable until {@code expiresAt}: {@link PaymentCreated} or a failure. The customer id
+     * reaches the gateway as its customer reference, for its risk checks.
+     */
     @MessageType(name = "payments.create-payment")
-    public record CreatePayment(UUID orderId, long amountPaise, Instant expiresAt) {
+    public record CreatePayment(UUID orderId, UUID customerId, long amountPaise, Instant expiresAt) {
     }
 
     /** The customer pays at {@code checkoutUrl}. */
@@ -45,7 +49,7 @@ public final class PaymentMessages {
     public record PaymentCancelled(UUID orderId, UUID paymentId) {
     }
 
-    /** An attempt is in flight, or the payment succeeded: its outcome follows. */
+    /** An attempt is in flight, so the payment cannot be cancelled now: its outcome follows. */
     @MessageType(name = "payments.payment-cancel-refused")
     public record PaymentCancelRefused(UUID orderId, UUID paymentId) {
     }
@@ -59,13 +63,23 @@ public final class PaymentMessages {
     public record PaymentPending(UUID orderId, UUID paymentId) {
     }
 
-    /** Refund a successful payment: {@link RefundInitiated}. */
+    /** Refund a successful payment: {@link RefundInitiated}, then {@link RefundSucceeded} or {@link RefundFailed}. */
     @MessageType(name = "payments.refund-payment")
     public record RefundPayment(UUID orderId, long amountPaise, RefundReason reason) {
     }
 
     @MessageType(name = "payments.refund-initiated")
     public record RefundInitiated(UUID orderId, UUID refundId, RefundReason reason, long amountPaise) {
+    }
+
+    /** The money is back with the customer; also for the gateway's own late-success refunds (FR-PAY5). */
+    @MessageType(name = "payments.refund-succeeded")
+    public record RefundSucceeded(UUID orderId, UUID refundId, RefundReason reason, long amountPaise) {
+    }
+
+    /** The refund failed and needs a person (S18). */
+    @MessageType(name = "payments.refund-failed")
+    public record RefundFailed(UUID orderId, UUID refundId, RefundReason reason, long amountPaise) {
     }
 
     @MessageType(name = "payments.payment-succeeded")

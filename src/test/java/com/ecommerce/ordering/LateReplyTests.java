@@ -18,8 +18,8 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
 
 /**
- * Duplicated, late and reordered messages through the outbox (LLD §6.5): each changes nothing, or undoes what a late
- * reply did elsewhere.
+ * Duplicated, late and reordered messages through the outbox (LLD §6.5, §7.9): each changes nothing, or undoes what a
+ * late reply did elsewhere.
  */
 class LateReplyTests extends OrderingTest {
 
@@ -148,12 +148,37 @@ class LateReplyTests extends OrderingTest {
     }
 
     @Test
-    void aPaymentThatSucceedsAfterTheOrderWasCancelledIsRefunded() {
+    void aPaymentThatSucceedsAfterItExpiredIsRefundedByTheGateway() {
         String sku = product("Steel bottle", 59_900, 5);
         UUID orderId = awaitingPayment(sku, 1);
         payments.expire(orderId);
         deliver();
         assertThat(reason(orderId)).isEqualTo("PAYMENT_EXPIRED");
+
+        payments.succeed(orderId);
+        deliver();
+        assertThat(order(asha, orderId).has("refund")).as("the gateway's refund is still pending").isFalse();
+        payments.succeedRefund(orderId);
+        deliver();
+
+        JsonNode refunded = order(asha, orderId);
+        assertThat(refunded.get("status").asString()).isEqualTo("CANCELLED");
+        assertThat(refunded.get("reason").asString()).isEqualTo("PAYMENT_EXPIRED");
+        assertThat(refunded.get("refund").get("status").asString()).isEqualTo("SUCCEEDED");
+        assertThat(refunded.get("refund").get("amount_paise").asLong()).isEqualTo(grandTotal(orderId));
+        assertThat(refunds(orderId)).containsExactly(entry("LATE_SUCCESS", grandTotal(orderId)));
+        assertThat(processed("payments.refund-payment")).as("the saga asked for no refund").isZero();
+        assertThat(payment(orderId)).isEqualTo("EXPIRED");
+        assertStock(sku, 5, 0);
+    }
+
+    @Test
+    void aLateSuccessTheGatewayAcceptsIsRefundedByTheSaga() {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID orderId = awaitingPayment(sku, 1);
+        payments.expire(orderId);
+        deliver();
+        payments.acceptLateSuccess(orderId);
 
         payments.succeed(orderId);
         deliverExcept(RefundPayment.class);
@@ -164,12 +189,23 @@ class LateReplyTests extends OrderingTest {
         assertThat(refunding.get("refund").get("status").asString()).isEqualTo("REQUESTED");
         deliver();
         assertThat(order(asha, orderId).get("refund").get("status").asString()).isEqualTo("INITIATED");
+        payments.succeedRefund(orderId);
+        deliver();
+        assertThat(order(asha, orderId).get("refund").get("status").asString()).isEqualTo("SUCCEEDED");
         assertThat(refunds(orderId)).containsExactly(entry("LATE_SUCCESS", grandTotal(orderId)));
+        assertThat(payment(orderId)).isEqualTo("SUCCEEDED");
         assertStock(sku, 5, 0);
     }
 
+    private int processed(String consumer) {
+        return jdbc.sql("SELECT count(*) FROM platform.processed_messages WHERE consumer = :consumer")
+                .param("consumer", consumer)
+                .query(Integer.class)
+                .single();
+    }
+
     private UUID paymentIdOf(UUID orderId) {
-        return jdbc.sql("SELECT payment_id FROM payments.simulated_payments WHERE order_id = :id")
+        return jdbc.sql("SELECT id FROM payments.payment_records WHERE order_id = :id")
                 .param("id", orderId)
                 .query(UUID.class)
                 .single();

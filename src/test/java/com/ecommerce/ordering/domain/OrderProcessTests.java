@@ -33,9 +33,11 @@ import com.ecommerce.payments.PaymentMessages.PaymentExpired;
 import com.ecommerce.payments.PaymentMessages.PaymentFailed;
 import com.ecommerce.payments.PaymentMessages.PaymentPending;
 import com.ecommerce.payments.PaymentMessages.PaymentSucceeded;
+import com.ecommerce.payments.PaymentMessages.RefundFailed;
 import com.ecommerce.payments.PaymentMessages.RefundInitiated;
 import com.ecommerce.payments.PaymentMessages.RefundPayment;
 import com.ecommerce.payments.PaymentMessages.RefundReason;
+import com.ecommerce.payments.PaymentMessages.RefundSucceeded;
 import com.ecommerce.pricing.CouponMessages.CommitCoupon;
 import com.ecommerce.pricing.CouponMessages.CouponReserved;
 import com.ecommerce.pricing.CouponMessages.CouponUnavailable;
@@ -108,7 +110,15 @@ class OrderProcessTests {
 
     private static final ReleaseReservation RELEASE_STOCK = new ReleaseReservation(ORDER);
     private static final ReleaseCoupon RELEASE_COUPON = new ReleaseCoupon(ORDER);
-    private static final CreatePayment CREATE_PAYMENT = new CreatePayment(ORDER, TOTAL, PAYMENT_EXPIRY);
+    private static final CreatePayment CREATE_PAYMENT = new CreatePayment(ORDER, CUSTOMER, TOTAL, PAYMENT_EXPIRY);
+    private static final RefundSucceeded REFUND_SUCCEEDED =
+            new RefundSucceeded(ORDER, REFUND, RefundReason.STOCK_LOST_AFTER_PAYMENT, TOTAL);
+    private static final RefundFailed REFUND_FAILED =
+            new RefundFailed(ORDER, REFUND, RefundReason.STOCK_LOST_AFTER_PAYMENT, TOTAL);
+    private static final RefundSucceeded LATE_REFUND_SUCCEEDED =
+            new RefundSucceeded(ORDER, REFUND, RefundReason.LATE_SUCCESS, TOTAL);
+    private static final RefundFailed LATE_REFUND_FAILED =
+            new RefundFailed(ORDER, REFUND, RefundReason.LATE_SUCCESS, TOTAL);
 
     // Builders: a process with a coupon unless a test says otherwise, driven at T0 and reloaded.
 
@@ -353,12 +363,22 @@ class OrderProcessTests {
 
         @Test
         void aPendingPaymentIsCheckedAgainInFiveMinutes() {
-            OrderProcess process = decide(awaitingPayment(), PAYMENT_PENDING);
+            OrderProcess checked = awaitingPayment().reloaded();
+            checked.onDeadline(HOLD_EXPIRY);
+            OrderProcess process = new OrderProcess(facts(COUPON), checked.state(), SETTINGS);
+            Instant answered = HOLD_EXPIRY.plusSeconds(30);
+
+            process.decide(PAYMENT_PENDING, answered);
 
             assertThat(process.changed()).isTrue();
             assertThat(process.commands()).isEmpty();
             assertState(process, OrderStatus.AWAITING_PAYMENT, null, Step.AWAITING_PAYMENT,
-                    NOW.plus(OrderProcess.RECHECK_INTERVAL));
+                    answered.plus(OrderProcess.RECHECK_INTERVAL));
+        }
+
+        @Test
+        void aPendingPaymentBeforeTheHoldExpiresIsSimplyAwaited() {
+            assertIgnored(awaitingPayment().reloaded(), PAYMENT_PENDING);
         }
     }
 
@@ -513,12 +533,18 @@ class OrderProcessTests {
         }
 
         @Test
-        void aPendingAttemptIsCheckedAgainInFiveMinutes() {
-            OrderProcess process = decide(awaitingOutcome, PAYMENT_PENDING);
+        void aPendingAttemptIsCheckedAgainInFiveMinutesOnceTheHoldExpired() {
+            assertIgnored(awaitingOutcome.reloaded(), PAYMENT_PENDING);
+            OrderProcess checked = awaitingOutcome.reloaded();
+            checked.onDeadline(HOLD_EXPIRY);
+            OrderProcess process = new OrderProcess(facts(COUPON), checked.state(), SETTINGS);
+            Instant answered = HOLD_EXPIRY.plusSeconds(30);
+
+            process.decide(PAYMENT_PENDING, answered);
 
             assertThat(process.commands()).isEmpty();
             assertState(process, OrderStatus.CANCELLING, null, Step.AWAITING_PAYMENT_OUTCOME,
-                    NOW.plus(OrderProcess.RECHECK_INTERVAL));
+                    answered.plus(OrderProcess.RECHECK_INTERVAL));
         }
 
         @Test
@@ -582,6 +608,124 @@ class OrderProcessTests {
         void anotherRefundsReplyIsIgnored() {
             assertIgnored(committing().then(LOST).reloaded(),
                     new RefundInitiated(ORDER, REFUND, RefundReason.LATE_SUCCESS, TOTAL));
+        }
+    }
+
+    @Nested
+    class RefundOutcomes {
+
+        private final Scenario refunding = committing().then(LOST);
+        private final Scenario initiated = refunding.then(
+                new RefundInitiated(ORDER, REFUND, RefundReason.STOCK_LOST_AFTER_PAYMENT, TOTAL));
+
+        @Test
+        void aSucceededRefundEndsTheProcess() {
+            OrderProcess process = decide(refunding, REFUND_SUCCEEDED);
+
+            assertThat(process.commands()).isEmpty();
+            assertState(process, OrderStatus.CANCELLED, OrderReason.STOCK_LOST_AFTER_PAYMENT, Step.DONE, null);
+            assertThat(process.state().refundStatus()).isEqualTo(RefundStatus.SUCCEEDED);
+            assertThat(process.refundFailed()).isFalse();
+        }
+
+        @Test
+        void aFailedRefundEndsTheProcessWithAnAlert() {
+            OrderProcess process = decide(refunding, REFUND_FAILED);
+
+            assertThat(process.commands()).isEmpty();
+            assertState(process, OrderStatus.CANCELLED, OrderReason.STOCK_LOST_AFTER_PAYMENT, Step.DONE, null);
+            assertThat(process.state().refundStatus()).isEqualTo(RefundStatus.FAILED);
+            assertThat(process.refundFailed()).isTrue();
+        }
+
+        @Test
+        void anInitiatedRefundEndsLater() {
+            OrderProcess succeeded = decide(initiated, REFUND_SUCCEEDED);
+            assertThat(succeeded.state().refundStatus()).isEqualTo(RefundStatus.SUCCEEDED);
+            assertThat(succeeded.step()).isEqualTo(Step.DONE);
+            assertThat(succeeded.commands()).isEmpty();
+
+            OrderProcess failed = decide(initiated, REFUND_FAILED);
+            assertThat(failed.state().refundStatus()).isEqualTo(RefundStatus.FAILED);
+            assertThat(failed.refundFailed()).isTrue();
+        }
+
+        @Test
+        void anEndedRefundStaysEnded() {
+            Scenario succeeded = refunding.then(REFUND_SUCCEEDED);
+
+            assertIgnored(succeeded.reloaded(), REFUND_SUCCEEDED);
+            assertIgnored(succeeded.reloaded(), REFUND_FAILED);
+            assertIgnored(succeeded.reloaded(),
+                    new RefundInitiated(ORDER, REFUND, RefundReason.STOCK_LOST_AFTER_PAYMENT, TOTAL));
+            assertIgnored(refunding.then(REFUND_FAILED).reloaded(), REFUND_SUCCEEDED);
+        }
+
+        @Test
+        void anotherRefundsEndIsIgnored() {
+            assertIgnored(refunding.reloaded(), new RefundSucceeded(ORDER, REFUND, RefundReason.ORDER_CANCELLED,
+                    TOTAL));
+            assertIgnored(initiated.reloaded(), LATE_REFUND_SUCCEEDED);
+        }
+
+        @Test
+        void theGatewaysLateSuccessRefundIsRecordedInAnyStep() {
+            for (Scenario unrefunded : List.of(awaitingPayment(), awaitingPayment().then(PAYMENT_EXPIRED),
+                    awaitingPayment().cancelled().then(PAYMENT_CANCELLED))) {
+                OrderProcess process = unrefunded.reloaded();
+                ProcessState before = process.state();
+
+                process.decide(LATE_REFUND_SUCCEEDED, NOW);
+
+                assertThat(process.commands()).isEmpty();
+                ProcessState after = process.state();
+                assertThat(after.refundReason()).isEqualTo(RefundReason.LATE_SUCCESS);
+                assertThat(after.refundAmountPaise()).isEqualTo(TOTAL);
+                assertThat(after.refundStatus()).isEqualTo(RefundStatus.SUCCEEDED);
+                assertThat(after.step()).isEqualTo(before.step());
+                assertThat(after.status()).isEqualTo(before.status());
+                assertThat(after.deadlineAt()).isEqualTo(before.deadlineAt());
+                assertThat(after.paymentSucceeded()).as("the order was never paid").isFalse();
+            }
+        }
+
+        @Test
+        void aFailedLateSuccessRefundIsAlerted() {
+            OrderProcess process = decide(awaitingPayment().then(PAYMENT_EXPIRED), LATE_REFUND_FAILED);
+
+            assertThat(process.state().refundStatus()).isEqualTo(RefundStatus.FAILED);
+            assertThat(process.state().refundReason()).isEqualTo(RefundReason.LATE_SUCCESS);
+            assertThat(process.refundFailed()).isTrue();
+        }
+    }
+
+    @Nested
+    class PaymentChecks {
+
+        @Test
+        void anOrderWaitingForItsPaymentAsksForItNow() {
+            for (Scenario waiting : List.of(awaitingPayment(), awaitingPayment().cancelled().then(CANCEL_REFUSED))) {
+                OrderProcess process = waiting.reloaded();
+                ProcessState before = process.state();
+
+                assertThat(process.requestPaymentCheck()).isTrue();
+
+                assertThat(process.commands()).containsExactly(new CheckPayment(ORDER));
+                assertThat(process.state()).as("only the command").isEqualTo(before);
+            }
+        }
+
+        @Test
+        void otherwiseNothingChanges() {
+            for (Step step : Step.values()) {
+                if (step == Step.AWAITING_PAYMENT || step == Step.AWAITING_PAYMENT_OUTCOME) {
+                    continue;
+                }
+                OrderProcess process = inStep(step);
+
+                assertThat(process.requestPaymentCheck()).as(step.name()).isFalse();
+                assertThat(process.changed()).as(step.name()).isFalse();
+            }
         }
     }
 
@@ -806,14 +950,18 @@ class OrderProcessTests {
         }
     }
 
-    /** What each step does with a message; any other message changes nothing (LLD §6.5). */
+    /**
+     * What each step does with a message; any other message changes nothing (LLD §6.5). The representative processes
+     * wait for their payment before the hold's expiry, when {@code PaymentPending} changes nothing: it moves the
+     * deadline only once the hold has expired (the {@code Deadlines} tests).
+     */
     private static final Map<Step, Set<Class<?>>> EXPECTED = Map.ofEntries(
             Map.entry(Step.RESERVING_STOCK, Set.of(StockReserved.class, StockReservationFailed.class)),
             Map.entry(Step.RESERVING_COUPON, Set.of(CouponReserved.class, CouponUnavailable.class)),
             Map.entry(Step.CREATING_PAYMENT, Set.of(PaymentCreated.class, PaymentCreationFailed.class,
                     PaymentSucceeded.class, PaymentFailed.class, PaymentExpired.class, PaymentCancelled.class)),
             Map.entry(Step.AWAITING_PAYMENT, Set.of(PaymentSucceeded.class, PaymentFailed.class,
-                    PaymentExpired.class, PaymentCancelled.class, PaymentPending.class)),
+                    PaymentExpired.class, PaymentCancelled.class)),
             Map.entry(Step.COMMITTING_STOCK, Set.of(ReservationCommitted.class, ReservationLost.class)),
             Map.entry(Step.AWAITING_HANDOVER, Set.of(ShipmentHandedOver.class, ShipmentDelivered.class,
                     ShipmentReturnInitiated.class, ShipmentReturnedToOrigin.class)),
@@ -823,20 +971,21 @@ class OrderProcessTests {
             Map.entry(Step.CANCELLING_PAYMENT, Set.of(PaymentCancelled.class, PaymentFailed.class,
                     PaymentExpired.class, PaymentSucceeded.class, PaymentCancelRefused.class)),
             Map.entry(Step.AWAITING_PAYMENT_OUTCOME, Set.of(PaymentCancelled.class, PaymentFailed.class,
-                    PaymentExpired.class, PaymentSucceeded.class, PaymentPending.class)),
+                    PaymentExpired.class, PaymentSucceeded.class)),
             Map.entry(Step.CANCELLING_SHIPMENT, Set.of(ShipmentCancelled.class, ShipmentCancelRefused.class,
                     ShipmentHandedOver.class, ShipmentDelivered.class, ShipmentReturnInitiated.class,
                     ShipmentReturnedToOrigin.class)),
-            Map.entry(Step.REFUNDING, Set.of(RefundInitiated.class)),
+            Map.entry(Step.REFUNDING, Set.of(RefundInitiated.class, RefundSucceeded.class, RefundFailed.class)),
             Map.entry(Step.DONE, Set.of()));
 
-    /** Every reply and event the process consumes. */
+    /** Every reply and event the process consumes; the refunds' are for the refund of the {@code REFUNDING} step. */
     private static List<Object> allMessages() {
         return List.of(STOCK_RESERVED, STOCK_SHORT, COMMITTED, LOST, COUPON_RESERVED, COUPON_UNAVAILABLE,
                 PAYMENT_CREATED, PAYMENT_CREATION_FAILED, PAYMENT_SUCCEEDED, PAYMENT_FAILED, PAYMENT_EXPIRED,
                 PAYMENT_CANCELLED, CANCEL_REFUSED, PAYMENT_PENDING,
-                new RefundInitiated(ORDER, REFUND, RefundReason.STOCK_LOST_AFTER_PAYMENT, TOTAL),
-                SHIPMENT_CANCELLED, SHIPMENT_CANCEL_REFUSED, HANDED_OVER, DELIVERED, RETURN_INITIATED, RETURNED);
+                new RefundInitiated(ORDER, REFUND, RefundReason.STOCK_LOST_AFTER_PAYMENT, TOTAL), REFUND_SUCCEEDED,
+                REFUND_FAILED, SHIPMENT_CANCELLED, SHIPMENT_CANCEL_REFUSED, HANDED_OVER, DELIVERED, RETURN_INITIATED,
+                RETURNED);
     }
 
     static Stream<Arguments> unexpectedMessages() {

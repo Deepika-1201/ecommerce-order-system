@@ -38,6 +38,9 @@ class PlatformCleanupTests extends IntegrationTest {
         task("old-dead", "DEAD", "now() - interval '31 days'");
         task("recent-succeeded", "SUCCEEDED", "now() - interval '29 days'");
         task("old-pending", "PENDING", "now() - interval '31 days'");
+        webhook("old-processed", "now() - interval '31 days'");
+        webhook("recent-processed", "now() - interval '29 days'");
+        webhook("old-unprocessed", "NULL");
 
         cleanup.run(new TaskExecution<>(UUID.randomUUID(), PlatformCleanup.TASK_TYPE, 1, null, null));
 
@@ -47,6 +50,8 @@ class PlatformCleanupTests extends IntegrationTest {
         assertThat(values("SELECT key FROM platform.idempotency_keys")).containsExactly("valid");
         assertThat(values("SELECT dedupe_key FROM platform.scheduled_tasks"))
                 .containsExactlyInAnyOrder("recent-succeeded", "old-pending");
+        assertThat(values("SELECT event_id FROM platform.webhook_inbox"))
+                .containsExactlyInAnyOrder("recent-processed", "old-unprocessed");
     }
 
     @Test
@@ -89,6 +94,13 @@ class PlatformCleanupTests extends IntegrationTest {
                         + "max_attempts, created_at, updated_at) "
                         + "VALUES (?, 'test.type', ?, 'null', ?, now(), 1, 10, " + updatedAt + ", " + updatedAt + ")")
                 .params(UUID.randomUUID(), dedupeKey, status)
+                .update();
+    }
+
+    private void webhook(String eventId, String processedAt) {
+        jdbc.sql("INSERT INTO platform.webhook_inbox (source, event_id, type, body, received_at, processed_at) "
+                        + "VALUES ('test', ?, 'test.event', '{}', now() - interval '40 days', " + processedAt + ")")
+                .param(eventId)
                 .update();
     }
 

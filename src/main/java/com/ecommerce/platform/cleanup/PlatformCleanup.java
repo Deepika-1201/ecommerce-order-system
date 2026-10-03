@@ -51,8 +51,14 @@ class PlatformCleanup {
                     WHERE status IN ('SUCCEEDED', 'DEAD') AND updated_at < now() - make_interval(secs => :ageSeconds)
                     LIMIT :batchSize)
                 """, properties.finishedTasks());
-        log.info("Cleanup deleted {} delivered messages, {} processed-message records, {} idempotency keys and {} "
-                + "finished tasks", messages, processed, keys, tasks);
+        int webhooks = deleteInBatches("""
+                DELETE FROM platform.webhook_inbox WHERE (source, event_id) IN (
+                    SELECT source, event_id FROM platform.webhook_inbox
+                    WHERE processed_at < now() - make_interval(secs => :ageSeconds)
+                    LIMIT :batchSize)
+                """, properties.processedWebhooks());
+        log.info("Cleanup deleted {} delivered messages, {} processed-message records, {} idempotency keys, {} "
+                + "finished tasks and {} processed webhooks", messages, processed, keys, tasks, webhooks);
     }
 
     private int deleteInBatches(String sql, Duration age) {
