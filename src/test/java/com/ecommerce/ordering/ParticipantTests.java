@@ -321,6 +321,18 @@ class ParticipantTests extends OrderingTest {
     }
 
     @Test
+    void aCancelOrACheckBeforeThePaymentExistsFailsItsDeliveryToBeTriedAgain() {
+        UUID unchecked = UUID.randomUUID();
+
+        assertThatThrownBy(() -> command(new CancelPayment(orderId)))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("Order " + orderId + " has no payment");
+        assertThatThrownBy(() -> command(new CheckPayment(unchecked), unchecked))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("Order " + unchecked + " has no payment");
+    }
+
+    @Test
     void theFakeGatewayRefusesWhatAPaymentsStatusDoesNotAllow() {
         UUID cancelled = createdPayment();
         command(new CancelPayment(cancelled), cancelled);

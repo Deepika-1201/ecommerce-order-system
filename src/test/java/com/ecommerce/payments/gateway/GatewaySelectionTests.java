@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.ecommerce.platform.ReceivedWebhook;
 import com.ecommerce.platform.WebhookInbox;
 import java.time.Clock;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -48,6 +49,18 @@ class GatewaySelectionTests {
                 .run(started -> assertThat(started).hasFailed());
         context.withPropertyValues("ecom.payments.gateway.base-url=http://payment-gateway:8090",
                         "ecom.payments.gateway.api-key=sk_test_selection")
+                .run(started -> assertThat(started).hasFailed());
+    }
+
+    @Test
+    void theCheckoutReturnsToTheStorefrontsPageForTheOrder() {
+        context.withPropertyValues("ecom.payments.return-url=https://shop.example/orders/{order_id}/paid")
+                .run(started -> {
+                    UUID orderId = UUID.randomUUID();
+                    assertThat(started.getBean(PaymentsProperties.class).returnUrl(orderId))
+                            .isEqualTo("https://shop.example/orders/" + orderId + "/paid");
+                });
+        context.withPropertyValues("ecom.payments.return-url=ftp://shop.example/orders/{order_id}")
                 .run(started -> assertThat(started).hasFailed());
     }
 

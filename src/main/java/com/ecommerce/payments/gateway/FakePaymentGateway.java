@@ -40,12 +40,17 @@ public class FakePaymentGateway implements PaymentGateway, PaymentSimulator {
     private record Stored(Object request, Object answer) {
     }
 
+    /** A call that carried an idempotency key, as the tests of the keys read it. */
+    record KeyedCall(String idempotencyKey, Object request) {
+    }
+
     private final GatewayEvents events;
     private final JsonMapper json;
     private final Clock clock;
     private final Map<String, FakePayment> payments = new HashMap<>();
     private final Map<UUID, FakePayment> paymentsByOrder = new HashMap<>();
     private final Map<String, Stored> answers = new HashMap<>();
+    private final List<KeyedCall> keyedCalls = new ArrayList<>();
     private final Map<UUID, Script> scripts = new HashMap<>();
 
     FakePaymentGateway(GatewayEvents events, JsonMapper json, Clock clock) {
@@ -58,6 +63,7 @@ public class FakePaymentGateway implements PaymentGateway, PaymentSimulator {
 
     @Override
     public synchronized GatewayPayment createPayment(NewPayment request, String idempotencyKey) {
+        keyedCalls.add(new KeyedCall(idempotencyKey, request));
         if (answers.containsKey(idempotencyKey)) {
             return replay(idempotencyKey, request, GatewayPayment.class);
         }
@@ -85,6 +91,7 @@ public class FakePaymentGateway implements PaymentGateway, PaymentSimulator {
     public synchronized CheckoutSession createCheckoutSession(String paymentId, String returnUrl,
                                                               String idempotencyKey) {
         List<String> request = List.of(paymentId, returnUrl);
+        keyedCalls.add(new KeyedCall(idempotencyKey, request));
         if (answers.containsKey(idempotencyKey)) {
             return replay(idempotencyKey, request, CheckoutSession.class);
         }
@@ -98,6 +105,7 @@ public class FakePaymentGateway implements PaymentGateway, PaymentSimulator {
 
     @Override
     public synchronized GatewayPayment cancelPayment(String paymentId, String idempotencyKey) {
+        keyedCalls.add(new KeyedCall(idempotencyKey, paymentId));
         if (answers.containsKey(idempotencyKey)) {
             return replay(idempotencyKey, paymentId, GatewayPayment.class);
         }
@@ -123,6 +131,7 @@ public class FakePaymentGateway implements PaymentGateway, PaymentSimulator {
     @Override
     public synchronized GatewayRefund createRefund(String paymentId, NewRefund request, String idempotencyKey) {
         List<Object> fingerprint = List.of(paymentId, request);
+        keyedCalls.add(new KeyedCall(idempotencyKey, request));
         if (answers.containsKey(idempotencyKey)) {
             return replay(idempotencyKey, fingerprint, GatewayRefund.class);
         }
@@ -141,6 +150,11 @@ public class FakePaymentGateway implements PaymentGateway, PaymentSimulator {
         FakeRefund refund = payment.refund(request.amountPaise(), GatewayRefund.Initiator.MERCHANT, request.reason(),
                 request.merchantRefundId(), clock.instant());
         return answer(idempotencyKey, fingerprint, refund.snapshot());
+    }
+
+    /** Every call that carried an idempotency key, oldest first. */
+    synchronized List<KeyedCall> keyedCalls() {
+        return List.copyOf(keyedCalls);
     }
 
     // The customer and the PSPs.

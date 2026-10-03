@@ -150,6 +150,7 @@ class GatewayContractTests {
         assertThat(request.path()).isEqualTo("/v1/payments/" + PAYMENT_ID + "/cancel");
         assertSigned(request, ORDER + ":cancel:2");
         assertValid("CancelPaymentRequest", request.body());
+        assertThat(JSON.readTree(request.body()).get("reason").asString()).isEqualTo("requested_by_customer");
         assertThat(cancelled.status()).isEqualTo(GatewayPayment.Status.CANCELLED);
         assertThat(cancelled.version()).isEqualTo(3);
     }

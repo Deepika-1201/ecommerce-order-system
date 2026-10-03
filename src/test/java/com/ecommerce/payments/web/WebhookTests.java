@@ -127,7 +127,8 @@ class WebhookTests extends OrderingTest {
 
     @Test
     void aSignedBodyThatIsNotAnEventIsRefused() {
-        for (String body : new String[] {"{}", "[]", "{\"id\": \"evt_x\"}", "not json"}) {
+        for (String body : new String[] {"{}", "[]", "{\"id\": \"evt_x\"}", "{\"type\": \"payment.succeeded\"}",
+            "{\"id\": \" \", \"type\": \"payment.succeeded\"}", "not json"}) {
             assertCode(send(body, signature(now(), body, WEBHOOK_SECRET)), 400, "malformed_request");
         }
         assertThat(stored()).isZero();

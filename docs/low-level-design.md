@@ -1515,13 +1515,13 @@ Handlers run in the delivery transaction and never call the gateway (§2.7). Tas
 | Command | Handler | Task | Answer |
 |---|---|---|---|
 | `CreatePayment` | Inserts the record (`CREATING`), once per order, and schedules the task. A repeat answers from the record once it is created or failed | `payments.create-payment`: the payment, then its session, each saved as it succeeds | `PaymentCreated` with the session's URL. `PaymentCreationFailed` on a refusal, or once the budget is spent: 60 seconds from the record's creation (S15), or less than a minute left before the payment would expire. A payment created without a session is then cancelled, best effort |
-| `CancelPayment` | Sets cancel requested and schedules the task | `payments.cancel-payment` | `PaymentCancelled`. Refused: the task reads the payment; while an attempt is in flight, `PaymentCancelRefused`, and the cancel is sent again if the attempt fails (§7.6). A final payment: its outcome |
+| `CancelPayment` | Sets cancel requested and schedules the task | `payments.cancel-payment` | `PaymentCancelled`. Refused: the task reads the payment; while an attempt is in flight, `PaymentCancelRefused`, and the cancel is sent again if the attempt fails (§7.6). A final payment: its outcome. An attempt that ended between the refusal and the read: nothing, and the saga's deadline sends the cancel again |
 | `CheckPayment` | Schedules the task | `payments.check-payment`: reads the payment and applies it | The outcome of a final payment, else `PaymentPending` |
 | `RefundPayment` | Inserts the refund (`REQUESTED`), once per order and reason, and schedules the task. A refund the gateway already has is answered at once | `payments.refund-payment` | `RefundInitiated`; `RefundSucceeded` or `RefundFailed` follow when it ends |
 
 - **Tasks are deduplicated per order and command** and retried with backoff, up to 10 attempts. A task that dies is replaced when the saga's deadline sends its command again (§6.7).
 - **A retried call sends the same request**, or the gateway refuses it as `422 idempotency_key_reuse`. The payment therefore lasts as long as its window counted from the record's creation, rather than from the call, and may end up to the creation budget later than the record says, well inside the hold.
-- **Any other refusal** (a refund of a payment that did not succeed, an id the gateway does not know) means a bug or a gateway that lost data. It is logged at `ERROR` and answered with nothing: the saga's deadline asks again, and alerts from the third attempt.
+- **Any other refusal** (a refund of a payment that did not succeed, an id the gateway does not know) means a bug or a gateway that lost data. It fails the task, which is retried with backoff (the gateway replays its answer for the key) until it dies, and nothing is answered: the saga's deadline asks again, and alerts from the third attempt.
 
 ### 7.6 Applying the gateway's state
 

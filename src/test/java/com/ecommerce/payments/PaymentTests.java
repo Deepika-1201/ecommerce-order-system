@@ -127,11 +127,12 @@ class PaymentTests extends OrderingTest {
         receive(paymentEvent(gatewayId, "payment.failed", "failed", 5));
         receive(paymentEvent(gatewayId, "payment.attempt_failed", "requires_payment_method", 3));
         receive(paymentEvent(gatewayId, "payment.failed", "failed", 5));
+        receive(paymentEvent(gatewayId, "payment.failed", "failed", 6));
         settle();
 
         assertThat(payment(orderId)).isEqualTo("FAILED");
         assertThat(column("SELECT gateway_version::text FROM payments.payment_records WHERE order_id = :id"))
-                .isEqualTo("5");
+                .isEqualTo("6");
         assertThat(answers()).containsExactly("payments.payment-created", "payments.payment-failed");
     }
 
@@ -149,19 +150,22 @@ class PaymentTests extends OrderingTest {
     }
 
     @Test
-    void eventsAboutOtherPaymentsAndDisputesAreKeptButChangeNothing() {
+    void eventsAboutOtherPaymentsAndRefundsAndDisputesAreKeptButChangeNothing() {
         command(create(orderId, Duration.ofMinutes(15)));
 
         receive(paymentEvent("pay_someone_else", "payment.succeeded", "succeeded", 2));
+        receive(refundEvent("evt_not_ours", gatewayPaymentId(orderId), "rfnd_not_ours", "someone-else:refund",
+                "succeeded", 1));
         receive("""
                 {"id": "evt_dispute_1", "type": "dispute.created", "created_at": "2026-10-03T10:00:00Z",
                  "data": {"object": {"id": "dsp_1", "object": "dispute"}}}
                 """);
         settle();
 
-        assertThat(count("SELECT count(*) FROM platform.webhook_inbox WHERE processed_at IS NOT NULL")).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM platform.webhook_inbox WHERE processed_at IS NOT NULL")).isEqualTo(3);
         assertThat(answers()).containsExactly("payments.payment-created");
         assertThat(payment(orderId)).isEqualTo("REQUIRES_PAYMENT_METHOD");
+        assertThat(count("SELECT count(*) FROM payments.refunds")).isZero();
     }
 
     @Test
@@ -211,18 +215,16 @@ class PaymentTests extends OrderingTest {
         DueMessages.deliverAllExcept(context, ANSWERS);
         jdbc.sql("DELETE FROM platform.scheduled_tasks WHERE type = 'payments.refund-payment'").update();
 
-        receive("""
-                {"id": "evt_refund_1", "type": "refund.succeeded", "created_at": "2026-10-03T10:00:00Z",
-                 "data": {"object": {"id": "rfnd_overtaking", "object": "refund", "payment_id": "%s",
-                   "attempt_id": "att_1", "amount": 123400, "currency": "INR", "status": "succeeded",
-                   "merchant_refund_id": "%s:ORDER_CANCELLED", "initiated_by": "merchant", "provider": "FAKE_PSP",
-                   "created_at": "2026-10-03T10:00:00Z", "updated_at": "2026-10-03T10:00:00Z", "version": 2}}}
-                """.formatted(gatewayPaymentId(orderId), orderId));
+        receive(refundEvent("evt_refund_1", gatewayPaymentId(orderId), "rfnd_overtaking",
+                orderId + ":ORDER_CANCELLED", "succeeded", 2));
+        settle();
+        receive(refundEvent("evt_refund_2", gatewayPaymentId(orderId), "rfnd_overtaking",
+                orderId + ":ORDER_CANCELLED", "succeeded", 3));
         settle();
         command(new RefundPayment(orderId, 123_400, RefundReason.ORDER_CANCELLED));
 
-        assertThat(answers()).containsExactly("payments.payment-created", "payments.payment-succeeded",
-                "payments.refund-succeeded", "payments.refund-initiated");
+        assertThat(answers()).as("its end published once").containsExactly("payments.payment-created",
+                "payments.payment-succeeded", "payments.refund-succeeded", "payments.refund-initiated");
         assertThat(column("SELECT gateway_refund_id || ' ' || status FROM payments.refunds WHERE order_id = :id"))
                 .isEqualTo("rfnd_overtaking SUCCEEDED");
     }
@@ -273,6 +275,18 @@ class PaymentTests extends OrderingTest {
                    "amount_refunded": 0, "attempt_count": 1, "expires_at": "2026-10-03T10:15:00Z",
                    "created_at": "2026-10-03T10:00:00Z", "updated_at": "2026-10-03T10:00:00Z", "version": %d}}}
                 """.formatted(UUID.randomUUID().toString().replace("-", ""), type, gatewayId, status, version);
+    }
+
+    /** A merchant refund as the gateway reports it. */
+    private static String refundEvent(String eventId, String gatewayPaymentId, String refundId, String merchantRefundId,
+                                      String status, long version) {
+        return """
+                {"id": "%s", "type": "refund.%s", "created_at": "2026-10-03T10:00:00Z",
+                 "data": {"object": {"id": "%s", "object": "refund", "payment_id": "%s",
+                   "attempt_id": "att_1", "amount": 123400, "currency": "INR", "status": "%s",
+                   "merchant_refund_id": "%s", "initiated_by": "merchant", "provider": "FAKE_PSP",
+                   "created_at": "2026-10-03T10:00:00Z", "updated_at": "2026-10-03T10:00:00Z", "version": %d}}}
+                """.formatted(eventId, status, refundId, gatewayPaymentId, status, merchantRefundId, version);
     }
 
     /** The types of what Payments published for the order, oldest first. */

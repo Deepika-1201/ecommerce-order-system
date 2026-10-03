@@ -164,8 +164,10 @@ class PaymentTasks {
     }
 
     /**
-     * Cancels the payment. Refused: reads it, and answers that it cannot be cancelled while an attempt is in flight;
-     * the cancel is sent again if the attempt fails (S6). A final payment is answered with its outcome.
+     * Cancels the payment. Refused during an attempt: reads it, and answers that it cannot be cancelled while the
+     * attempt is in flight; the cancel is sent again if the attempt fails (S6). A final payment is answered with its
+     * outcome. An attempt that ended between the refusal and the read is left to the saga's deadline, which sends the
+     * cancel again. Any other refusal fails the task (LLD §7.5).
      */
     @HandlesTask(type = CANCEL)
     void cancelPayment(TaskExecution<PaymentTask> task) {
@@ -174,20 +176,16 @@ class PaymentTasks {
         if (record.gatewayPaymentId() == null) {
             throw new IllegalStateException("The payment of order " + orderId + " is not created yet");
         }
-        boolean refused = false;
         GatewayPayment payment;
         try {
             payment = gateway.cancelPayment(record.gatewayPaymentId(), orderId + ":cancel:" + record.gatewayVersion());
         } catch (GatewayRefusedException e) {
             if (!"payment_invalid_state".equals(e.code())) {
-                log.error("The gateway refused to cancel the payment of order {}: {}", orderId, e.code());
-                return;
+                throw e;
             }
-            refused = true;
             payment = gateway.payment(record.gatewayPaymentId());
         }
         GatewayPayment reported = payment;
-        boolean cancellableAgain = refused && reported.status().canBeCancelled();
         transactions.executeWithoutResult(status -> {
             Applied applied = updates.apply(repository.lock(orderId).orElseThrow(), reported, correlation(task));
             PaymentRecord current = applied.record();
@@ -195,17 +193,13 @@ class PaymentTasks {
                 if (!applied.published()) {
                     updates.publish(PaymentUpdates.outcome(current), current, correlation(task));
                 }
-            } else if (!cancellableAgain) {
+            } else if (current.status() == GatewayPayment.Status.PROCESSING) {
                 updates.publish(new PaymentCancelRefused(orderId, current.id()), current, correlation(task));
             }
         });
-        if (cancellableAgain) {
-            throw new IllegalStateException("The payment of order " + orderId + " became cancellable while it was "
-                    + "being cancelled; trying again");
-        }
     }
 
-    /** Reads the payment and applies it: its outcome if final, else pending. */
+    /** Reads the payment and applies it: its outcome if final, else pending. A refusal fails the task. */
     @HandlesTask(type = CHECK)
     void checkPayment(TaskExecution<PaymentTask> task) {
         UUID orderId = task.payload().orderId();
@@ -215,14 +209,7 @@ class PaymentTasks {
                     repository.lock(orderId).orElseThrow(), correlation(task)));
             return;
         }
-        GatewayPayment payment;
-        try {
-            payment = gateway.payment(record.gatewayPaymentId());
-        } catch (GatewayRefusedException e) {
-            log.error("The gateway does not know the payment of order {} ({}): {}", orderId,
-                    record.gatewayPaymentId(), e.code());
-            return;
-        }
+        GatewayPayment payment = gateway.payment(record.gatewayPaymentId());
         transactions.executeWithoutResult(status -> {
             Applied applied = updates.apply(repository.lock(orderId).orElseThrow(), payment, correlation(task));
             PaymentRecord current = applied.record();
@@ -234,7 +221,10 @@ class PaymentTasks {
         });
     }
 
-    /** Creates the refund at the gateway once, and answers that it was initiated; its end follows by event. */
+    /**
+     * Creates the refund at the gateway once, and answers that it was initiated; its end follows by event. A refusal
+     * fails the task.
+     */
     @HandlesTask(type = REFUND)
     void refundPayment(TaskExecution<RefundTask> task) {
         UUID orderId = task.payload().orderId();
@@ -244,14 +234,8 @@ class PaymentTasks {
         GatewayRefund created = null;
         if (refund.gatewayRefundId() == null) {
             PaymentRecord payment = repository.find(orderId).orElseThrow();
-            try {
-                created = gateway.createRefund(payment.gatewayPaymentId(), new NewRefund(refund.amountPaise(),
-                                reason.name().toLowerCase(Locale.ROOT), orderId + ":" + reason),
-                        orderId + ":refund:" + reason);
-            } catch (GatewayRefusedException e) {
-                log.error("The gateway refused the {} refund of order {}: {}", reason, orderId, e.code());
-                return;
-            }
+            created = gateway.createRefund(payment.gatewayPaymentId(), new NewRefund(refund.amountPaise(),
+                    reason.name().toLowerCase(Locale.ROOT), orderId + ":" + reason), orderId + ":refund:" + reason);
         }
         GatewayRefund answer = created;
         transactions.executeWithoutResult(status -> {
