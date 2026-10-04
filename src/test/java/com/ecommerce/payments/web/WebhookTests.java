@@ -6,6 +6,10 @@ import com.ecommerce.ordering.OrderingTest;
 import com.ecommerce.payments.PaymentMessages.CreatePayment;
 import com.ecommerce.payments.PaymentMessages.PaymentCreated;
 import com.ecommerce.payments.PaymentMessages.PaymentSucceeded;
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
@@ -96,7 +100,8 @@ class WebhookTests extends OrderingTest {
 
         assertRefused(post(port, PATH, event));
         for (String header : new String[] {"garbage", "t=" + t, "v1=" + v1, "t=soon,v1=" + v1,
-            "t=" + t + ",v1=" + v1.substring(1), "t=" + t + ",v1=zz" + v1.substring(2), "t=" + t + ";v1=" + v1}) {
+            "t=" + Long.MAX_VALUE + ",v1=" + v1, "t=" + t + ",v1=" + v1.substring(1),
+            "t=" + t + ",v1=zz" + v1.substring(2), "t=" + t + ";v1=" + v1}) {
             assertRefused(send(event, header));
         }
         assertThat(stored()).isZero();
@@ -115,13 +120,13 @@ class WebhookTests extends OrderingTest {
     }
 
     @Test
-    void aBodyOverSixtyFourKilobytesIsRefused() {
+    void aBodyOverSixtyFourKilobytesIsRefused() throws IOException, InterruptedException {
         String event = succeeded("evt_large").replace("\"version\"", "\"padding\": \"" + "x".repeat(65_536)
                 + "\", \"version\"");
+        String signature = signature(now(), event, WEBHOOK_SECRET);
 
-        HttpResponse<String> response = send(event, signature(now(), event, WEBHOOK_SECRET));
-
-        assertCode(response, 413, "payload_too_large");
+        assertCode(send(event, signature), 413, "payload_too_large");
+        assertCode(sendChunked(event, signature), 413, "payload_too_large");
         assertThat(stored()).isZero();
     }
 
@@ -146,6 +151,19 @@ class WebhookTests extends OrderingTest {
     private HttpResponse<String> send(String body, String signature) {
         return post(port, PATH, body, "PG-Signature", signature, "PG-Event-Id", "evt_header",
                 "PG-Event-Type", "payment.succeeded");
+    }
+
+    /** A chunked body, without a Content-Length: only the cap on what is read stops it. */
+    private HttpResponse<String> sendChunked(String body, String signature) throws IOException, InterruptedException {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + PATH))
+                .header("Content-Type", "application/json")
+                .header("PG-Signature", signature)
+                .POST(HttpRequest.BodyPublishers.fromPublisher(HttpRequest.BodyPublishers.ofString(body)))
+                .timeout(Duration.ofSeconds(10))
+                .build();
+        try (HttpClient client = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).build()) {
+            return client.send(request, HttpResponse.BodyHandlers.ofString());
+        }
     }
 
     private static void assertRefused(HttpResponse<String> response) {

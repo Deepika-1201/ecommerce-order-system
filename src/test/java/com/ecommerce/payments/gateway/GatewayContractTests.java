@@ -188,6 +188,10 @@ class GatewayContractTests {
         assertThat(request.path()).isEqualTo("/v1/payments/" + PAYMENT_ID + "/refunds");
         assertSigned(request, ORDER + ":refund:ORDER_CANCELLED");
         assertValid("CreateRefundRequest", request.body());
+        JsonNode body = JSON.readTree(request.body());
+        assertThat(body.get("amount").asLong()).isEqualTo(59_900);
+        assertThat(body.get("reason").asString()).isEqualTo("order_cancelled");
+        assertThat(body.get("merchant_refund_id").asString()).isEqualTo(ORDER + ":ORDER_CANCELLED");
         assertValid("Refund", refund);
         assertThat(created).isEqualTo(new GatewayRefund("rfnd_01K5Z9V4J6Q2X8N3M7B1C0D4F1", PAYMENT_ID, 59_900,
                 GatewayRefund.Status.INITIATED, GatewayRefund.Initiator.MERCHANT, ORDER + ":ORDER_CANCELLED", 1));
