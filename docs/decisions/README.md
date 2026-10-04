@@ -27,3 +27,6 @@ Format: Context → Problem → Options considered → Decision → Trade-offs �
 | [ADR-021](ADR-021-stock-movements.md) | Every change to on-hand stock writes a movement beside the counters; `on_hand` equals their sum | Accepted |
 | [ADR-022](ADR-022-simulated-payments-and-fulfillment.md) | Payments and Fulfillment start as simulators behind their real messages, until phases 7 and 8 | Accepted |
 | [ADR-023](ADR-023-order-address-snapshots.md) | Orders reference immutable address snapshots kept in the customer schema | Accepted |
+| [ADR-024](ADR-024-tracking-newest-reachable-scan.md) | A shipment applies a carrier scan only if it is newer and its status reachable along the state machine | Accepted |
+| [ADR-025](ADR-025-carrier-simulator.md) | The V1 carrier is a simulator in process, behind the carrier port, with its parcels in the database | Accepted |
+| [ADR-026](ADR-026-serviceability-at-placement.md) | Placement checks that the carrier serves the delivery PIN code, from a list kept locally | Accepted |

@@ -463,7 +463,7 @@ Summarized here; [api.md](api.md) is the reference.
 | Contact | Recipient name and mobile number required |
 
 - **Why GST codes, not ISO 3166-2:** GST place of supply (phase 4) is what the state is for, and ISO changed several Indian codes in 2023. The list lives in `shared` (`IndianState`), for Pricing and Fulfillment too.
-- **PIN code and state are not cross-checked.** Carrier serviceability (phase 8) is the real check.
+- **PIN code and state are not cross-checked.** Carrier serviceability, checked at placement from phase 8 (§8.10), is the real check.
 
 | Endpoint | Purpose |
 |---|---|
@@ -1669,3 +1669,258 @@ A mutation check broke 107 rules one at a time; the tests caught 106 once 14 gap
 | End to end against the real gateway with its mock PSP scenarios: decline, timeout, pending without a webhook | The ecosystem demo in CI |
 | Webhooks: signature, inbox, versions | `WebhookTests`, `PaymentTests` |
 | Contract tests against the gateway's OpenAPI document | `GatewayContractTests` |
+
+## 8. Fulfillment (phase 8)
+
+### 8.1 Scope
+
+Phase 8 delivers:
+
+- **Shipments:** one per confirmed order, booked with the carrier through a port. A carrier outage is retried for 24 hours, then escalated to support; it never cancels the order (FR-FUL1, FR-FUL4, S8).
+- **The warehouse's work:** packed and handed over, through the API (FR-FUL2).
+- **Tracking:** the carrier's scans, from a signed webhook into the platform's inbox. A scan applies only if it is newer and the state machine can reach it, so a shipment never moves backwards ([ADR-024](decisions/ADR-024-tracking-newest-reachable-scan.md); FR-FUL2, FR-FUL3, S12).
+- **Return to origin,** restocked and refunded end to end (FR-FUL5).
+- **A carrier simulator** with scripted scenarios picked by the delivery PIN code: outage, unserviceable PIN code, late and out-of-order tracking, failed delivery and return to origin ([ADR-025](decisions/ADR-025-carrier-simulator.md), Q10). It replaces the shipment simulator ([ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md)).
+- **Serviceability** checked at placement ([ADR-026](decisions/ADR-026-serviceability-at-placement.md)).
+
+Not yet:
+
+- **Phase 9:** emails about the shipment, the delivery and S8's 24-hour delay; `order.shipped` and the other integration events.
+- **Phase 10:** the booking retries move to the Job Scheduler.
+- **Phase 12:** the booking alert as a metric and an alert rule.
+- **Phase 13:** rate limits on the carrier's webhook path.
+- **A tracking poll.** A lost scan is caught by the saga's deadlines (14 days for delivery, 21 for a return, §6.7), not by asking the carrier.
+
+### 8.2 Module boundaries and messages
+
+| Package | Holds |
+|---|---|
+| `fulfillment` | The messages (§6.2); `Shipments`, the reads Ordering uses (a shipment with its tracking, and serviceability); `ShipmentSimulator`, which now drives the warehouse and the carrier simulator in tests (§8.9) |
+| `fulfillment.domain` | Shipments and their tracking history, the command handlers, the tasks that call the carrier, and the one place that applies a scan (§8.6) |
+| `fulfillment.carrier` | The `Carrier` port and the carrier simulator |
+| `fulfillment.web` | The warehouse's and support's endpoints, and the tracking webhook |
+| `platform` | The webhook inbox, and now the signature check and the capped body read both webhooks use, moved from Payments |
+
+- **Fulfillment may now depend on Customer:** the booking task reads the delivery snapshot ([ADR-023](decisions/ADR-023-order-address-snapshots.md)).
+
+Changes to §6.2:
+
+- **`CreateShipment(order, delivery address, lines)`** gains the lines, SKU and quantity, which the warehouse packs. Commands carry everything their handler needs.
+- **`ShipmentBooked` and `ShipmentBookingFailed` are not published.** Nothing consumes them: the saga's step does not change at booking, the order shows its shipment from Fulfillment (§8.11), and Fulfillment raises the booking alert itself (§8.5). This amends event model §3 and domain model §3.
+- **The four shipment events** (`ShipmentHandedOver`, `ShipmentDelivered`, `ShipmentReturnInitiated`, `ShipmentReturnedToOrigin`) are now the milestones of §8.6.
+
+### 8.3 The carrier port
+
+| Operation | Does | Idempotent through |
+|---|---|---|
+| Serviceable | Whether the carrier delivers to a PIN code, from a list the adapter keeps locally | Read only |
+| Book | Books a parcel for the delivery address and the lines; returns the AWB | The reference, which is the shipment id: a known reference answers with its AWB (S8) |
+| Cancel | Cancels a booking; refused once the carrier has the parcel | The AWB: a cancelled booking answers cancelled again |
+
+- **Two kinds of failure,** as in §7.3. *Refused* carries a code (`unserviceable`, `invalid_address`, `picked_up`). *Unavailable* covers timeouts and outages; the task retries with backoff and the same reference.
+- **One adapter in V1,** the simulator (§8.9). A real carrier's adapter implements the same port, and looks a reference up before booking again.
+
+### 8.4 Shipments
+
+One per order, in `fulfillment.shipments`:
+
+| Field | Holds |
+|---|---|
+| Ids | Its own, which the carrier receives as the booking's reference; the order's (unique); the carrier's AWB once booked (unique) |
+| Delivery address | The order's snapshot id. The address stays in Customer ([ADR-023](decisions/ADR-023-order-address-snapshots.md)) |
+| Lines | SKU and quantity, from `CreateShipment`, in `fulfillment.shipment_lines` |
+| Status | Order lifecycle §4: `PENDING_BOOKING`, `BOOKING_FAILED`, `BOOKED`, `PACKED`, `HANDED_OVER`, `IN_TRANSIT`, `OUT_FOR_DELIVERY`, `DELIVERY_ATTEMPT_FAILED`, `DELIVERED`, `RTO_IN_TRANSIT`, `RTO_DELIVERED`, `CANCELLED` |
+| Booking deadline | 24 hours after creation (S8); support's re-drive sets a new one |
+| Last scan at | The carrier's time of the newest applied scan |
+| Cancel requested | Set while a booking is being cancelled at the carrier |
+| `version` | Counts the shipment's changes: the sequence of what Fulfillment publishes (§2.3) |
+
+**Tracking history,** in `fulfillment.tracking_events`: every carrier scan, once per carrier event id, applied or not, and every warehouse mark. Each row has its source (`CARRIER` or `WAREHOUSE`), status, location, time (the carrier's, or this system's for a mark), when it was received, and whether it applied. The order shows the applied ones.
+
+### 8.5 Commands and tasks
+
+Handlers run in the delivery transaction and never call the carrier. Tasks call it outside any transaction, then apply what they learned in a short transaction that locks the shipment (as in §7.5).
+
+| Command | Handler | Task | Answer |
+|---|---|---|---|
+| `CreateShipment` | Inserts the shipment, `PENDING_BOOKING`, with its lines, once per order. A shipment cancelled before the create arrived stays cancelled. Schedules the booking | `fulfillment.book-shipment`: reads the delivery snapshot, books, and saves the AWB: `BOOKED` | None: the saga waits for the handover |
+| `CancelShipment` | Not booked yet (`PENDING_BOOKING`, `BOOKING_FAILED`, or no shipment): `CANCELLED` at once. `BOOKED` or `PACKED`: cancel requested, and the task scheduled. Handed over or later: refused | `fulfillment.cancel-shipment`: cancels the booking. Accepted: `CANCELLED`. Refused as `picked_up`: refused, and the carrier's scans follow | `ShipmentCancelled` or `ShipmentCancelRefused`; a repeat answers the same |
+
+- **The booking budget (S8)** is 24 hours from creation. The task retries an unavailable carrier with backoff, 10 seconds doubling to an hour, up to 40 attempts, which outlast the budget.
+- **When the budget runs out or the carrier refuses,** the shipment is `BOOKING_FAILED`. Fulfillment logs `shipment_booking_failed` at `ERROR` with the order and the reason. The order stays `CONFIRMED`: paid, with its stock committed (FR-FUL4).
+- **Support re-drives a failed booking** with `POST /v1/support/shipments/{id}/booking`: back to `PENDING_BOOKING` with a new budget, audit-logged. Support can also cancel the order, which cancels the shipment and refunds (§6.6).
+- **A booking that completes after a cancellation** (the cancel came while the carrier was being called) is cancelled at the carrier, best effort, and logged.
+- **The warehouse cannot pack or hand over a shipment being cancelled** (`409 shipment_cancelling`): the parcel must stay in. A carrier scan still applies, because the parcel is where the carrier says. The cancel task then finds it picked up.
+
+### 8.6 Applying a scan
+
+Scans from the webhook and from the simulator end in one method ([ADR-024](decisions/ADR-024-tracking-newest-reachable-scan.md); amends the rule of order lifecycle §4):
+
+1. **Lock the shipment,** found by the reference the scan carries. An unknown reference is logged, and the event marked processed.
+2. **Record the scan** in the tracking history, once per carrier event id.
+3. **Apply it only if both hold:**
+   - its time is after the last applied scan's;
+   - its status is **reachable** from the current status along the state machine's arrows, skipping states the carrier did not scan.
+
+   Otherwise it stays in the history, unapplied.
+4. **Publish each milestone the change reaches,** in order, from aggregate `shipment` with the shipment's version:
+
+   | Reached | Published |
+   |---|---|
+   | `HANDED_OVER`, or any later status | `ShipmentHandedOver` |
+   | `DELIVERED` | `ShipmentDelivered` |
+   | `RTO_IN_TRANSIT` or `RTO_DELIVERED` | `ShipmentReturnInitiated` |
+   | `RTO_DELIVERED` | `ShipmentReturnedToOrigin` |
+
+The carrier's scans and the statuses they mean:
+
+| Scan | Status |
+|---|---|
+| `picked_up` | `HANDED_OVER` |
+| `in_transit` | `IN_TRANSIT` |
+| `out_for_delivery` | `OUT_FOR_DELIVERY` |
+| `delivery_attempt_failed` | `DELIVERY_ATTEMPT_FAILED` |
+| `delivered` | `DELIVERED` |
+| `rto_in_transit` | `RTO_IN_TRANSIT` |
+| `rto_delivered` | `RTO_DELIVERED` |
+
+- **Why reachable, not the next step:** carriers miss and reorder scans. A `delivered` that arrives before `out_for_delivery` must apply, and the late `out_for_delivery` must not. A next-step rule would ignore both, and the shipment would stay in transit forever.
+- **Why the carrier's time, not a rank:** a reattempt returns to `OUT_FOR_DELIVERY` (domain model), so only the time tells a new `out_for_delivery` from a late one.
+- **A tie** with the last applied scan's time is not applied.
+- **The warehouse's marks** (`PACKED`, `HANDED_OVER`, §8.7) move along the same machine at this system's time. They do not set the last scan's time, which compares carrier times only.
+- **A scan for a cancelled shipment** is recorded, not applied, and logged at `WARN`: the parcel moved after its booking was cancelled.
+
+### 8.7 The warehouse
+
+- **The warehouse lists** the shipments to pack (`BOOKED`) and to hand over (`PACKED`), oldest first, with their lines, AWB and delivery address.
+- **`packed`** moves `BOOKED` to `PACKED`. **`handed-over`** moves `PACKED` to `HANDED_OVER` and publishes `ShipmentHandedOver`; the carrier's scans follow.
+- **Marks are idempotent.** A mark the shipment has already passed answers `200` with the shipment, unchanged. A mark it cannot take is `409 shipment_invalid_state`: packing before the booking, handing over before packing, or either after a cancellation.
+- **Each mark is audit-logged,** as the warehouse's stock changes are (§5), and enters the tracking history.
+
+### 8.8 Tracking webhook
+
+`POST /v1/webhooks/carrier` follows §7.7:
+
+- **A 64 KB cap,** refused with `413 payload_too_large`.
+- **The signature:** `Carrier-Signature: t=…,v1=…`, an HMAC-SHA256 of `t.body` with one of the configured secrets (two while one rotates). The timestamp must be within 5 minutes of now, either way; otherwise `401 invalid_signature`.
+- **The body** is stored in the platform inbox as text, with source `carrier` (`400 malformed_request` without an event id and type), and acknowledged with `200` after the commit. A task per event, `fulfillment.apply-carrier-event`, applies it (§8.6).
+
+The event, the simulator's contract:
+
+```json
+{"id": "evt_01K…", "type": "tracking.scan", "created_at": "2026-10-04T10:00:05Z",
+ "data": {"reference": "<shipment id>", "awb": "SIM4820193377", "scan": "in_transit",
+          "occurred_at": "2026-10-04T10:00:00Z", "location": "Bengaluru sort centre"}}
+```
+
+- **The scheme is the simulator's.** A real carrier's adapter verifies that carrier's scheme in front of the same inbox (requirements §9).
+- **Other event types** are stored and marked processed without effect, as Payments does with disputes.
+
+### 8.9 The carrier simulator
+
+**In process, behind the port** ([ADR-025](decisions/ADR-025-carrier-simulator.md)). Its parcels are rows in `fulfillment.simulated_parcels`, so they survive a restart while they advance on their own. Its scans enter the inbox as the webhook's do, without HTTP or signatures, as the fake gateway's events do (§7.10).
+
+**Scenarios, by the last digit of the delivery PIN code.** The tests' and demos' address, 560038, is standard.
+
+| Digit | Scenario |
+|---|---|
+| 1 | Outage: the first two bookings time out, the third books |
+| 2 | Unserviceable: refused at placement (§8.10) |
+| 3 | Late and out of order: `delivered` arrives first, then `in_transit` and `out_for_delivery` with earlier times; `in_transit` is delivered twice |
+| 4 | A failed attempt, then delivered on the reattempt |
+| 5 | Two failed attempts, then return to origin: `rto_in_transit`, `rto_delivered` |
+| 6 | Refused at booking as `invalid_address`: serviceable at placement, undeliverable to the carrier |
+| Any other | `in_transit`, `out_for_delivery`, `delivered` |
+
+- **The warehouse's handover starts a parcel's scans.** The simulator watches for it as a carrier's driver would see the parcel, and scans start at `in_transit`. `picked_up` exists for a carrier that scans before the warehouse marks.
+- **It advances on its own** when `ecom.fulfillment.simulator.auto-advance` is on, as in the compose stacks. A recurring task every 5 seconds sends each handed-over parcel's next scan. Off by default and in tests, which drive it.
+- **Tests drive it through `ShipmentSimulator`.** Phase 6's methods stay, so the saga's tests do not change:
+  - `handOver`: the warehouse packs and hands over.
+  - `deliver`: `in_transit`, `out_for_delivery`, `delivered`.
+  - `startReturn`: `delivery_attempt_failed`, `rto_in_transit`.
+  - `completeReturn`: `rto_delivered`.
+  - New: `scan(order, scan, occurredAt)`, any scan at any time, for out-of-order cases.
+
+  The phase 6 methods refuse what the carrier could not do (a delivery after a return) with `IllegalStateException`; `scan` refuses nothing.
+- **Cancel** is refused once the simulator has scanned the parcel.
+
+### 8.10 Serviceability
+
+- **Placement checks the delivery PIN code** with `Shipments.serviceable`, after the address checks of §6.3: `422 address_not_serviceable`, before anything is reserved ([ADR-026](decisions/ADR-026-serviceability-at-placement.md)).
+- **The adapter answers from its list,** kept locally: the simulator's is every PIN code not ending in 2. No carrier call is in the placement's path.
+- **A PIN code that stops being serviceable after placement** is refused at booking, and handled as §8.5 says.
+
+### 8.11 API
+
+| Endpoint | Access | Purpose |
+|---|---|---|
+| `GET /v1/warehouse/shipments?status=` | `warehouse` | Shipments to work on, oldest first: `BOOKED` by default, or `PACKED`. With their lines, AWB and delivery address; cursor pagination |
+| `POST /v1/warehouse/shipments/{id}/packed` | `warehouse` | Packed (§8.7); `200` with the shipment |
+| `POST /v1/warehouse/shipments/{id}/handed-over` | `warehouse` | Handed over; `200` with the shipment |
+| `POST /v1/support/shipments/{id}/booking` | `support` | Books a failed booking again (§8.5); `202` |
+| `POST /v1/webhooks/carrier` | Signed by the carrier | Tracking scans (§8.8) |
+
+- **Orders show their shipment**, for the customer and for support: its status, the carrier, the AWB, and the applied tracking, newest first. Ordering reads it from `Shipments` when it shows the order, as it reads the addresses from Customer.
+
+| Code | Status | When |
+|---|---|---|
+| `shipment_invalid_state` | 409 | A warehouse mark the shipment cannot take; a re-drive of a booking that has not failed |
+| `shipment_cancelling` | 409 | A warehouse mark while the shipment's booking is being cancelled |
+| `address_not_serviceable` | 422 | Placement to a PIN code the carrier does not serve |
+| `invalid_signature` | 401 | A carrier webhook not signed with a configured secret, or signed too long ago |
+
+### 8.12 Database
+
+| Table | Holds |
+|---|---|
+| `fulfillment.shipments` | §8.4 |
+| `fulfillment.shipment_lines` | A shipment's SKUs and quantities |
+| `fulfillment.tracking_events` | The tracking history (§8.4) |
+| `fulfillment.simulated_parcels` | The carrier simulator's parcels: reference, AWB, PIN code, booking attempts, cancellation, and the next scan |
+
+- The phase 6 simulator's table is dropped.
+- Checks that every update keeps: an AWB exactly when booked or later; a booking deadline while the booking is pending; cancel requested only while `BOOKED` or `PACKED`; positive quantities.
+- Columns and indexes are in [database.md](database.md).
+
+### 8.13 Configuration
+
+| Property | Default | Notes |
+|---|---|---|
+| `ecom.fulfillment.booking-budget` | `24h` | S8 |
+| `ecom.fulfillment.webhook-secrets` | — | Without one, every carrier webhook is refused |
+| `ecom.fulfillment.webhook-tolerance` | `5m` | |
+| `ecom.fulfillment.simulator.auto-advance` | `false` | `true` in the compose stacks |
+
+### 8.14 Local environment and demo
+
+`scripts/demo-fulfillment.sh` runs against the ecosystem stack, whose real gateway confirms the orders (§7.15). CI's `ecosystem` job runs it after the payments demo.
+
+1. **560038:** asha orders and pays on the hosted checkout: `CONFIRMED`. meera lists the shipment, packs it and hands it over: `SHIPPED`. The carrier's scans follow: `DELIVERED`, with the tracking on the order.
+2. **560003:** the scans arrive out of order and late: `DELIVERED` all the same, with the late scans in the history, unapplied.
+3. **560005:** two failed attempts and a return: `RETURNED_TO_ORIGIN`, the unit back in stock, the refund `SUCCEEDED`.
+4. **560001:** the carrier is down for the first two bookings: booked on the third.
+5. **560002:** placement is refused with `422 address_not_serviceable`.
+6. A carrier webhook with a forged signature gets `401`.
+
+### 8.15 Tests
+
+| Test | Proves |
+|---|---|
+| `TrackingTests` (unit) | §8.6 for every status against every scan, with an earlier, equal and later time; the milestones every jump publishes |
+| `TrackingProperties` (jqwik) | Itineraries through the state machine, delivered in random order with duplicates: the status never moves backwards, and ends where the newest reachable scan says |
+| `ShipmentTests` | §8.5 through messages: booking with retries and its budget, refusals and the re-drive; cancellation before booking, while booked or packed (accepted, or refused because the carrier has the parcel), after the handover; a booking completed after its cancellation |
+| `WarehouseTests` | §8.7 over HTTP: the lists, marks and their repeats, invalid states and cancellations, access by role, audit entries |
+| `CarrierWebhookTests` | §8.8 over HTTP: signatures, the cap, malformed bodies, duplicates, scans out of order applied by their tasks |
+| `FulfillmentSchemaTests` | Each check of the fulfillment schema |
+| `PlacementTests` | `422 address_not_serviceable`, with nothing reserved |
+| `OrderFlowTests`, `RefundTests` | Through the carrier simulator: delivered; returned to origin, restocked and refunded |
+| `ParticipantTests` | Fulfillment's handlers as §8.5 says |
+| The ecosystem demo, in CI | §8.14 |
+
+### 8.16 Exit criteria
+
+| Criterion | Shown by |
+|---|---|
+| Tracking never moves backwards | `TrackingTests`, `TrackingProperties`; `CarrierWebhookTests` over HTTP |
+| Return to origin restocks and refunds | `OrderFlowTests`; the demo in CI, against the real gateway |
+| The carrier's scripted failures: outage, unserviceable PIN code, late or out-of-order tracking, failed delivery, return to origin (Q10) | `ShipmentTests`, `CarrierWebhookTests`; the demo in CI |

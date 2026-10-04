@@ -128,7 +128,7 @@ stateDiagram-v2
     CANCELLED --> [*]
 ```
 
-A tracking update is applied only if it is a valid transition from the current status **and** its carrier timestamp is newer than the last applied one. Otherwise it is kept in the history and ignored. A rank alone would not work: a reattempt legitimately goes back to `OUT_FOR_DELIVERY`.
+A tracking update is applied only if its carrier timestamp is newer than the last applied one **and** its status is reachable from the current status along the arrows above, skipping states the carrier did not scan ([ADR-024](decisions/ADR-024-tracking-newest-reachable-scan.md), amended in phase 8: the rule first required a valid transition, which a late scan would have stalled). Otherwise it is kept in the history and ignored. A rank alone would not work: a reattempt legitimately goes back to `OUT_FOR_DELIVERY`.
 
 ## 5. Races and how they resolve
 

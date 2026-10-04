@@ -118,7 +118,7 @@ Placing a reservation updates each StockItem it touches in one local transaction
 **Shipment** (aggregate root, one per order in V1)
 
 - Holds: order id (unique), lines, carrier, AWB, status, tracking history, booking attempts.
-- Invariants: status changes follow the shipment state machine ([order-lifecycle.md §4](order-lifecycle.md#4-related-state-machines)) and only for newer carrier events; cancellation only before handover.
+- Invariants: status changes follow the shipment state machine ([order-lifecycle.md §4](order-lifecycle.md#4-related-state-machines)) and only for newer carrier scans whose status the machine can reach ([ADR-024](decisions/ADR-024-tracking-newest-reachable-scan.md)); cancellation only before handover.
 
 ### Catalog, Cart, Customer, Notifications
 
@@ -138,7 +138,7 @@ Placing a reservation updates each StockItem it touches in one local transaction
 | Inventory | ReserveStock, CommitReservation, ReleaseReservation, FulfillReservation, RestockReturn, ReceiveStock, AdjustStock | StockReserved, StockReservationFailed, ReservationCommitted, ReservationLost, StockLevelChanged |
 | Pricing | CreateQuote, ReserveCoupon, CommitCoupon, ReleaseCoupon | CouponReserved, CouponUnavailable |
 | Payments | CreatePayment, CancelPayment, CheckPayment, RefundPayment | PaymentCreated, PaymentCreationFailed, PaymentSucceeded, PaymentFailed, PaymentExpired, PaymentCancelled, PaymentCancelRefused, PaymentPending, RefundInitiated, RefundSucceeded, RefundFailed |
-| Fulfillment | CreateShipment, CancelShipment, MarkPacked, MarkHandedOver | ShipmentBooked, ShipmentBookingFailed, ShipmentCancelled, ShipmentCancelRefused, ShipmentHandedOver, ShipmentDelivered, ShipmentReturnInitiated, ShipmentReturnedToOrigin |
+| Fulfillment | CreateShipment, CancelShipment, MarkPacked, MarkHandedOver | ShipmentCancelled, ShipmentCancelRefused, ShipmentHandedOver, ShipmentDelivered, ShipmentReturnInitiated, ShipmentReturnedToOrigin (ShipmentBooked and ShipmentBookingFailed were dropped in phase 8: nothing consumes them, [LLD §8.2](low-level-design.md#82-module-boundaries-and-messages)) |
 | Catalog | Product and price management | None published in V1; a product event stream arrives with its first consumer |
 | Cart, Customer | Their own create, update and delete operations | None: nothing consumes them |
 

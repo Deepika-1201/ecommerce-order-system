@@ -53,12 +53,12 @@ Kafka record: key = `aggregate_id`; value = the envelope as JSON; headers `trace
 | CancelPayment | Saga | Payments | Gateway key from the order id | PaymentCancelled, PaymentCancelRefused |
 | CheckPayment | Saga, at a deadline | Payments | Read only | The payment's outcome, or PaymentPending |
 | RefundPayment | Saga | Payments | Gateway key from the order id and the reason | RefundInitiated |
-| CreateShipment | Saga | Fulfillment | One shipment per order | — (ShipmentBooked follows) |
+| CreateShipment | Saga | Fulfillment | One shipment per order | — (the shipment's events follow) |
 | CancelShipment | Saga | Fulfillment | Status guard | ShipmentCancelled, ShipmentCancelRefused |
 
-Domain events the saga consumes: PaymentSucceeded, PaymentFailed, PaymentExpired, PaymentCancelled, RefundSucceeded, RefundFailed (Payments); ShipmentBooked, ShipmentBookingFailed, ShipmentHandedOver, ShipmentDelivered, ShipmentReturnInitiated, ShipmentReturnedToOrigin (Fulfillment).
+Domain events the saga consumes: PaymentSucceeded, PaymentFailed, PaymentExpired, PaymentCancelled, RefundSucceeded, RefundFailed (Payments); ShipmentHandedOver, ShipmentDelivered, ShipmentReturnInitiated, ShipmentReturnedToOrigin (Fulfillment).
 
-Phase 6 added `CheckPayment` and dropped the replies and events nothing consumes, such as `ReservationReleased` and `ReservationExpired`; RefundSucceeded, RefundFailed, ShipmentBooked and ShipmentBookingFailed arrive with phases 7 and 8 ([LLD §6.2](low-level-design.md#62-module-boundaries-and-messages)).
+Phase 6 added `CheckPayment` and dropped the replies and events nothing consumes, such as `ReservationReleased` and `ReservationExpired`; RefundSucceeded and RefundFailed arrived with phase 7 ([LLD §6.2](low-level-design.md#62-module-boundaries-and-messages)). Phase 8 dropped ShipmentBooked and ShipmentBookingFailed: the saga does not change step at booking, and Fulfillment raises the booking alert itself ([LLD §8.2](low-level-design.md#82-module-boundaries-and-messages)).
 
 ## 4. Integration events (Kafka)
 
