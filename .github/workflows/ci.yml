@@ -113,6 +113,8 @@ jobs:
         run: scripts/demo-orders.sh
       - name: Phase 7 demo (hosted checkout, webhooks, refunds; the PSP's timeout, silence and decline)
         run: scripts/demo-payments.sh
+      - name: Phase 8 demo (packed, handed over and delivered; scans out of order; return to origin; carrier outage)
+        run: scripts/demo-fulfillment.sh
       - name: Show logs
         if: failure()
         run: docker compose logs

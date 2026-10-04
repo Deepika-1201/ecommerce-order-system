@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| Status | Grows with each module's schema. Phase 2 (platform), phase 3 (catalog, customer), phase 4 (cart, pricing), phase 5 (inventory), phase 6 (ordering, address snapshots, the shipment simulator), phase 7 (payments, the webhook inbox) |
-| Decisions | [ADR-005](decisions/ADR-005-postgresql.md) (PostgreSQL, a schema per module), [ADR-008](decisions/ADR-008-transactional-outbox.md) (outbox), [ADR-009](decisions/ADR-009-inventory-reservation.md) (reservations), [ADR-010](decisions/ADR-010-idempotency.md) (idempotency), [ADR-021](decisions/ADR-021-stock-movements.md) (stock movements), [ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md) (simulators), [ADR-023](decisions/ADR-023-order-address-snapshots.md) (address snapshots) |
+| Status | Grows with each module's schema. Phase 2 (platform), phase 3 (catalog, customer), phase 4 (cart, pricing), phase 5 (inventory), phase 6 (ordering, address snapshots), phase 7 (payments, the webhook inbox), phase 8 (fulfillment, the carrier simulator) |
+| Decisions | [ADR-005](decisions/ADR-005-postgresql.md) (PostgreSQL, a schema per module), [ADR-008](decisions/ADR-008-transactional-outbox.md) (outbox), [ADR-009](decisions/ADR-009-inventory-reservation.md) (reservations), [ADR-010](decisions/ADR-010-idempotency.md) (idempotency), [ADR-021](decisions/ADR-021-stock-movements.md) (stock movements), [ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md) (simulators), [ADR-023](decisions/ADR-023-order-address-snapshots.md) (address snapshots), [ADR-024](decisions/ADR-024-tracking-newest-reachable-scan.md) (tracking), [ADR-025](decisions/ADR-025-carrier-simulator.md) (carrier simulator) |
 
 ## 1. Conventions
 
@@ -158,10 +158,22 @@ erDiagram
 - Refunds change under their payment record's lock, and each change counts in the record's `version`, which orders what Payments publishes.
 - Phase 7 dropped the payment simulator's tables (`simulated_payments`, `simulated_refunds`).
 
-## 10. Simulators (phase 6, until phase 8)
+## 10. `fulfillment` (phase 8)
 
-| Table | Columns | Constraints |
+```mermaid
+erDiagram
+    shipments ||--|{ shipment_lines : "shipment_id"
+    shipments ||--o{ tracking_events : "shipment_id"
+    shipments ||--o| simulated_parcels : "id = reference"
+```
+
+| Table | Columns | Constraints and indexes |
 |---|---|---|
-| `fulfillment.simulated_shipments` | `order_id`, `status`, `version`, `created_at`, `updated_at` | Primary key `order_id` |
+| `shipments` | `id`, `order_id`, `delivery_address_id`, `status`, `carrier`, `awb`, `booking_deadline`, `booking_failure`, `last_scan_at`, `cancel_requested`, `version`, `created_at`, `updated_at` | `order_id` and `awb` unique; an AWB, and its carrier, from the booking on; a deadline while the booking is pending; a reason exactly when it failed; cancel requested only while `BOOKED` or `PACKED`; no address only for a shipment cancelled before its create arrived. Partial index on `(status, id)` for the warehouse's `BOOKED` and `PACKED` lists |
+| `shipment_lines` | `shipment_id`, `sku`, `quantity` | Primary key `(shipment_id, sku)`; positive quantities |
+| `tracking_events` | `id`, `shipment_id`, `source`, `event_id`, `status`, `location`, `occurred_at`, `received_at`, `applied` | `event_id` unique: the carrier's, for its scans; none for the warehouse's marks, which always apply. Index on `(shipment_id, occurred_at)` |
+| `simulated_parcels` | `reference`, `awb`, `pin_code`, `booking_attempts`, `cancelled`, `scan`, `scanned_at`, `next_step`, `created_at`, `updated_at` | The carrier simulator's own records ([ADR-025](decisions/ADR-025-carrier-simulator.md)): `awb` unique; cancelled only when booked and never scanned |
 
-Phase 8 drops it with the shipment simulator ([ADR-022](decisions/ADR-022-simulated-payments-and-fulfillment.md)).
+- A shipment moves only along its state machine, and a carrier scan only if it is newer and its status reachable ([LLD §8.6](low-level-design.md#86-applying-a-scan)); every scan is kept in `tracking_events`, applied or not.
+- The delivery address stays in Customer's snapshots, referenced by id ([ADR-023](decisions/ADR-023-order-address-snapshots.md)).
+- Phase 8 dropped the phase 6 shipment simulator's table (`simulated_shipments`).

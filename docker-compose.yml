@@ -84,6 +84,8 @@ services:
       ECOM_MEDIA_PATH_STYLE: "true"
       ECOM_MEDIA_ACCESS_KEY: local-access-key
       ECOM_MEDIA_SECRET_KEY: local-secret-key
+      # The carrier simulator moves handed-over parcels on by itself (LLD §8.9).
+      ECOM_FULFILLMENT_SIMULATOR_AUTO_ADVANCE: "true"
     ports:
       - "8080:8080"
       - "8081:8081"

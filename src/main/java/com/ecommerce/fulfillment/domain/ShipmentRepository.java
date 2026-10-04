@@ -152,10 +152,13 @@ class ShipmentRepository {
                 .list();
     }
 
-    /** Adds a step to the tracking history; a carrier event already there is not added again. */
-    boolean track(UUID shipmentId, TrackingSource source, String eventId, ShipmentStatus status, String location,
-                  Instant occurredAt, boolean applied, Instant now) {
-        return jdbc.sql("""
+    /**
+     * Adds a step to the tracking history. A carrier event already there, as when its task runs again after it
+     * committed, is not added twice; nor does it apply again, its time being no longer newer.
+     */
+    void track(UUID shipmentId, TrackingSource source, String eventId, ShipmentStatus status, String location,
+               Instant occurredAt, boolean applied, Instant now) {
+        jdbc.sql("""
                         INSERT INTO fulfillment.tracking_events (id, shipment_id, source, event_id, status, location,
                                                                  occurred_at, received_at, applied)
                         VALUES (:id, :shipmentId, :source, :eventId, :status, :location, :occurredAt, :now, :applied)
@@ -170,7 +173,7 @@ class ShipmentRepository {
                 .param("occurredAt", utc(occurredAt))
                 .param("now", utc(now))
                 .param("applied", applied)
-                .update() == 1;
+                .update();
     }
 
     /** The steps that applied, newest first: what the order shows. */

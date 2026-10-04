@@ -4,7 +4,6 @@ import com.ecommerce.fulfillment.ShipmentMessages.CancelShipment;
 import com.ecommerce.fulfillment.ShipmentMessages.CreateShipment;
 import com.ecommerce.fulfillment.ShipmentMessages.ShipmentCancelRefused;
 import com.ecommerce.fulfillment.ShipmentMessages.ShipmentCancelled;
-import com.ecommerce.fulfillment.ShipmentStatus;
 import com.ecommerce.platform.Correlation;
 import com.ecommerce.platform.HandlesMessage;
 import com.ecommerce.platform.IncomingMessage;
@@ -37,15 +36,12 @@ class ShipmentCommandHandlers {
         this.clock = clock;
     }
 
-    /** One shipment per order, booked by a task; a shipment cancelled before this arrived stays cancelled. */
+    /** One shipment per order, booked by a task, which leaves a shipment cancelled before this arrived alone. */
     @HandlesMessage(consumer = "fulfillment.create-shipment")
     void createShipment(IncomingMessage<CreateShipment> message) {
-        UUID orderId = message.payload().orderId();
         Instant now = clock.instant();
         repository.insertIfAbsent(Ids.newId(), message.payload(), now.plus(properties.bookingBudget()), now);
-        if (repository.lock(orderId).orElseThrow().status() == ShipmentStatus.PENDING_BOOKING) {
-            tasks.schedule(ShipmentTasks.book(orderId, message.correlationId()));
-        }
+        tasks.schedule(ShipmentTasks.book(message.payload().orderId(), message.correlationId()));
     }
 
     /** Cancelled at once before the booking; at the carrier while booked or packed; refused once handed over. */

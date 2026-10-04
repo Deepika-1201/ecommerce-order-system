@@ -46,10 +46,7 @@ class ShipmentUpdates {
     void applyScan(Shipment locked, String eventId, ShipmentStatus scanned, Instant occurredAt, String location) {
         boolean applies = Tracking.applies(locked.status(), locked.lastScanAt(), scanned, occurredAt);
         Instant now = clock.instant();
-        if (!repository.track(locked.id(), TrackingSource.CARRIER, eventId, scanned, location, occurredAt, applies,
-                now)) {
-            return;
-        }
+        repository.track(locked.id(), TrackingSource.CARRIER, eventId, scanned, location, occurredAt, applies, now);
         if (applies) {
             publishMilestones(locked.status(), repository.moved(locked.id(), scanned, occurredAt, now));
         } else if (locked.status() == ShipmentStatus.CANCELLED) {

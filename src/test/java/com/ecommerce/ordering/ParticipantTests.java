@@ -375,6 +375,8 @@ class ParticipantTests extends OrderingTest {
 
         assertThat(replies()).extracting(Reply::type).containsExactly("fulfillment.shipment-cancelled");
         assertThat(shipment(orderId)).isEqualTo("CANCELLED");
+        assertThat(jdbc.sql("SELECT count(*) FROM platform.scheduled_tasks WHERE last_error IS NOT NULL")
+                .query(Integer.class).single()).as("its booking task stops quietly").isZero();
     }
 
     @Test

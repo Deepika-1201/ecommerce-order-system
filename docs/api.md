@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | Grows with each phase. Phase 3: identity, customers, catalog. Phase 4: carts, quotes, coupons. Phase 5: warehouse stock. Phase 6: orders. Phase 7: payment checks and the gateway's webhooks |
+| Status | Grows with each phase. Phase 3: identity, customers, catalog. Phase 4: carts, quotes, coupons. Phase 5: warehouse stock. Phase 6: orders. Phase 7: payment checks and the gateway's webhooks. Phase 8: the warehouse's shipments, support's booking re-drive, the carrier's webhook, and the shipment on each order |
 | Contract | `docs/api/openapi.json`, generated from the code and checked in CI ([ADR-016](decisions/ADR-016-openapi-from-code.md)) |
 | Design | [LLD §3](low-level-design.md#3-catalog-customers-and-identity-phase-3), [LLD §4](low-level-design.md#4-cart-pricing-and-coupons-phase-4), [LLD §5](low-level-design.md#5-inventory-phase-5), [LLD §6](low-level-design.md#6-ordering-and-the-saga-phase-6), [LLD §7](low-level-design.md#7-payments-phase-7) |
 
@@ -61,12 +61,14 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 | `adjustment_below_reserved` | 409 | A stock adjustment would leave fewer units on hand than orders have reserved |
 | `quote_expired`, `quote_already_ordered` | 409 | Placing an order: the quote's 10 minutes are over, or another order was placed from it |
 | `order_invalid_state` | 409 | The order cannot be cancelled in its status |
+| `shipment_invalid_state`, `shipment_cancelling` | 409 | A warehouse mark the shipment cannot take (or a re-drive of a booking that has not failed); a mark while the shipment is being cancelled |
 | `precondition_failed` | 412 | `If-Match` does not match the current version |
 | `payload_too_large` | 413 | A webhook body over 64 KB |
 | `idempotency_key_reused`, `upload_mismatch` | 422 | The key was used for a different request; the uploaded object is not what was announced |
 | `unknown_category` | 422 | The category or parent category in the body does not exist |
 | `item_unavailable` | 422 | The SKU does not exist or cannot be bought now |
 | `address_not_found`, `address_state_mismatch` | 422 | Placing an order: no such address among the caller's, or the delivery address is in another state than the quote's |
+| `address_not_serviceable` | 422 | Placing an order: the carrier does not deliver to the address's PIN code ([ADR-026](decisions/ADR-026-serviceability-at-placement.md)) |
 | `coupon_not_found`, `coupon_not_yet_valid`, `coupon_expired`, `coupon_requires_sign_in`, `coupon_minimum_not_met` | 422 | The coupon cannot apply to this cart; see [LLD §4.9](low-level-design.md#49-coupons) |
 | `precondition_required` | 428 | `If-Match` is required |
 | `internal_error` | 500 | Unexpected; details are in the logs under the request id |
@@ -109,5 +111,8 @@ Every error is `application/problem+json` (RFC 9457), with `type`, `title`, `sta
 | `GET /v1/support/orders/{id}`; `POST /v1/support/orders/{id}/cancel` (with `Idempotency-Key`) | `support` | 6 |
 | `POST /v1/me/orders/{id}/payment-check` | `customer` | 7 |
 | `POST /v1/webhooks/payment-gateway` | The gateway, by signature | 7 |
+| `GET /v1/warehouse/shipments?status=BOOKED\|PACKED`; `POST /v1/warehouse/shipments/{id}/packed`, `/handed-over` | `warehouse` | 8 |
+| `POST /v1/support/shipments/{id}/booking` | `support` | 8 |
+| `POST /v1/webhooks/carrier` | The carrier, by signature | 8 |
 
 The OpenAPI document has the request and response schemas. Locally it is also served at `http://localhost:8081/actuator/openapi`.

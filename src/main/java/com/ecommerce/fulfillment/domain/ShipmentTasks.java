@@ -9,6 +9,7 @@ import com.ecommerce.fulfillment.carrier.Carrier;
 import com.ecommerce.fulfillment.carrier.CarrierEvents;
 import com.ecommerce.fulfillment.carrier.CarrierEvents.CarrierEvent;
 import com.ecommerce.fulfillment.carrier.CarrierRefusedException;
+import com.ecommerce.fulfillment.carrier.CarrierUnavailableException;
 import com.ecommerce.platform.Correlation;
 import com.ecommerce.platform.HandlesTask;
 import com.ecommerce.platform.ReceivedWebhook;
@@ -32,8 +33,11 @@ class ShipmentTasks {
 
     static final String BOOK = "fulfillment.book-shipment";
     static final String CANCEL = "fulfillment.cancel-shipment";
-    /** Enough to outlast the booking budget at the runner's backoff, which tops out at an hour (S8). */
-    static final int BOOKING_ATTEMPTS = 40;
+    /**
+     * Far more than the budget uses: at the runner's backoff, 10 s doubling to an hour with jitter down to half, 100
+     * attempts span at least 45 hours. Should they not, the last one fails the booking rather than dying silently.
+     */
+    static final int BOOKING_ATTEMPTS = 100;
 
     private static final Logger log = LoggerFactory.getLogger(ShipmentTasks.class);
 
@@ -99,6 +103,12 @@ class ShipmentTasks {
             awb = carrier.book(new Carrier.Parcel(shipment.id(), address(address), repository.lines(shipment.id())));
         } catch (CarrierRefusedException e) {
             fail(orderId, "the carrier refused it: " + e.code());
+            return;
+        } catch (CarrierUnavailableException e) {
+            if (task.attempt() < BOOKING_ATTEMPTS) {
+                throw e;
+            }
+            fail(orderId, "the carrier stayed unavailable for " + BOOKING_ATTEMPTS + " attempts");
             return;
         }
         boolean cancelled = Boolean.TRUE.equals(transactions.execute(status -> {

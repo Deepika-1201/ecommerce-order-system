@@ -30,6 +30,11 @@ class FulfillmentSchemaTests extends OrderingTest {
                 + "WHERE order_id = :id", booked);
         assertRejected("shipments_carrier", "UPDATE fulfillment.shipments SET carrier = NULL WHERE order_id = :id",
                 booked);
+        UUID other = shipment("560038");
+        assertRejected("shipments_awb_key", """
+                UPDATE fulfillment.shipments SET awb = (SELECT awb FROM fulfillment.shipments WHERE order_id = '%s')
+                WHERE order_id = :id
+                """.formatted(other), booked);
     }
 
     @Test
@@ -76,6 +81,18 @@ class FulfillmentSchemaTests extends OrderingTest {
         assertRejected("tracking_events_source", insert.formatted("'WAREHOUSE', 'evt_1', 'PACKED'", "true"), booked);
         assertRejected("tracking_events_source", insert.formatted("'WAREHOUSE', NULL, 'IN_TRANSIT'", "true"), booked);
         assertRejected("tracking_events_source", insert.formatted("'WAREHOUSE', NULL, 'PACKED'", "false"), booked);
+    }
+
+    @Test
+    void theSimulatorCancelsOnlyABookedParcelItHasNotScanned() {
+        UUID booked = shipment("560038");
+        String parcel = "UPDATE fulfillment.simulated_parcels SET %s "
+                + "WHERE reference = (SELECT id FROM fulfillment.shipments WHERE order_id = :id)";
+
+        assertRejected("simulated_parcels_cancelled", parcel.formatted("cancelled = true, awb = NULL"), booked);
+        assertRejected("simulated_parcels_cancelled",
+                parcel.formatted("cancelled = true, scan = 'in_transit', scanned_at = now()"), booked);
+        assertRejected("simulated_parcels_scanned", parcel.formatted("scan = 'in_transit'"), booked);
     }
 
     /** A shipment of order with a delivery address at this PIN code, after its booking task ran; the order's id. */

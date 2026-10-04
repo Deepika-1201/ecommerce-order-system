@@ -13,6 +13,8 @@ import com.ecommerce.fulfillment.ShipmentMessages.ShipmentHandedOver;
 import com.ecommerce.fulfillment.ShipmentMessages.ShipmentReturnInitiated;
 import com.ecommerce.fulfillment.ShipmentMessages.ShipmentReturnedToOrigin;
 import com.ecommerce.fulfillment.ShipmentStatus;
+import com.ecommerce.fulfillment.Shipments;
+import com.ecommerce.fulfillment.Shipments.TrackingEntry;
 import com.ecommerce.fulfillment.carrier.Carrier;
 import com.ecommerce.fulfillment.carrier.CarrierEvents;
 import com.ecommerce.fulfillment.carrier.CarrierUnavailableException;
@@ -47,6 +49,8 @@ class ShipmentTests extends OrderingTest {
 
     @Autowired
     private SimulatedCarrier carrier;
+    @Autowired
+    private Shipments queries;
     @Autowired
     private ShipmentRepository repository;
     @Autowired
@@ -135,6 +139,21 @@ class ShipmentTests extends OrderingTest {
                 .isEqualTo(403);
         assertCode(call("POST", "/v1/support/shipments/" + UUID.randomUUID() + "/booking", support, null), 404,
                 "not_found");
+    }
+
+    @Test
+    void aCarrierDownForEveryAttemptFailsTheBookingOnTheLastOne(CapturedOutput output) {
+        command(create(orderId, "560001"));
+        ShipmentTasks tasks = new ShipmentTasks(repository, updates, carrier, events, inbox, customers, transactions,
+                clock);
+
+        tasks.bookShipment(new TaskExecution<>(UUID.randomUUID(), ShipmentTasks.BOOK,
+                ShipmentTasks.BOOKING_ATTEMPTS, null, new ShipmentTasks.ShipmentTask(orderId, null)));
+
+        assertThat(shipmentRow().get("status")).isEqualTo("BOOKING_FAILED");
+        assertThat(shipmentRow().get("booking_failure"))
+                .isEqualTo("the carrier stayed unavailable for " + ShipmentTasks.BOOKING_ATTEMPTS + " attempts");
+        assertThat(output.getOut()).contains("shipment_booking_failed: order " + orderId);
     }
 
     @Test
@@ -268,6 +287,20 @@ class ShipmentTests extends OrderingTest {
         assertThat(answers()).containsExactly("fulfillment.shipment-handed-over", "fulfillment.shipment-delivered");
         assertThat(tracking()).containsExactly("PACKED applied", "HANDED_OVER applied", "DELIVERED applied",
                 "IN_TRANSIT late", "OUT_FOR_DELIVERY late");
+        assertThat(queries.ofOrder(orderId).orElseThrow().tracking()).extracting(TrackingEntry::status)
+                .as("what the order shows: the applied steps, newest first")
+                .containsExactly(ShipmentStatus.DELIVERED, ShipmentStatus.HANDED_OVER, ShipmentStatus.PACKED);
+    }
+
+    @Test
+    void theCarrierAnswersAKnownReferenceWithItsAwb() {
+        command(create(orderId, "560038"));
+        UUID shipmentId = (UUID) shipmentRow().get("id");
+        Carrier.Parcel parcel = new Carrier.Parcel(shipmentId, new Carrier.Address("Asha Rao", "+919876543210",
+                "12, 4th Cross", null, null, "Bengaluru", "29", "560038"), List.of());
+
+        assertThat(carrier.book(parcel)).isEqualTo(shipmentRow().get("awb"));
+        assertThat(carrier.parcel(shipmentId).orElseThrow().awb()).isEqualTo(shipmentRow().get("awb"));
     }
 
     @Test
@@ -303,6 +336,9 @@ class ShipmentTests extends OrderingTest {
 
         events.receive(scanEvent("evt_unknown_reference", UUID.randomUUID(), "delivered"));
         events.receive(scanEvent("evt_unknown_scan", shipmentId, "lost_in_space"));
+        events.receive(scanEvent("evt_no_time", shipmentId, "delivered").replace("\"occurred_at\"", "\"other\""));
+        events.receive(scanEvent("evt_no_reference", shipmentId, "delivered").replace("\"reference\"", "\"other\""));
+        events.receive(scanEvent("evt_no_scan", shipmentId, "delivered").replace("\"scan\"", "\"other\""));
         events.receive("""
                 {"id": "evt_other_type", "type": "billing.invoice", "created_at": "2026-10-04T10:00:00Z", "data": {}}
                 """);
@@ -310,7 +346,7 @@ class ShipmentTests extends OrderingTest {
 
         assertThat(shipmentRow().get("status")).isEqualTo("HANDED_OVER");
         assertThat(jdbc.sql("SELECT count(*) FROM platform.webhook_inbox WHERE processed_at IS NOT NULL")
-                .query(Integer.class).single()).isEqualTo(3);
+                .query(Integer.class).single()).isEqualTo(6);
     }
 
     private void handedOver(String pinCode) {
