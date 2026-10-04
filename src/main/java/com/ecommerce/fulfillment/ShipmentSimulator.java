@@ -1,23 +1,30 @@
 package com.ecommerce.fulfillment;
 
+import java.time.Instant;
 import java.util.UUID;
 
 /**
- * Drives the simulated shipments that stand in for the warehouse and the carrier until phase 8 (ADR-022, LLD §6.8).
- * Each method runs in a transaction of its own and publishes the event the real module will. A method the shipment's
- * status does not allow throws {@link IllegalStateException}.
+ * Drives the warehouse and the carrier simulator in tests (LLD §8.9), with phase 6's methods, so that the saga's tests
+ * did not change. The warehouse's marks take effect at once. Scans enter the inbox as the carrier's webhooks do, and
+ * take effect when their task runs. A method the parcel's state does not allow throws {@link IllegalStateException}.
  */
 public interface ShipmentSimulator {
 
-    /** Booked to handed over: {@code ShipmentHandedOver}. */
+    /** The warehouse packs the booked shipment and hands it over: {@code ShipmentHandedOver}. */
     void handOver(UUID orderId);
 
-    /** Handed over to delivered: {@code ShipmentDelivered}. */
+    /** The carrier scans the parcel in transit, out for delivery and delivered. */
     void deliver(UUID orderId);
 
-    /** Handed over to returning, after a failed delivery: {@code ShipmentReturnInitiated}. */
+    /** A delivery attempt fails, and the parcel starts back to the warehouse. */
     void startReturn(UUID orderId);
 
-    /** Returning to back at the warehouse: {@code ShipmentReturnedToOrigin}. */
+    /** The returning parcel is back at the warehouse. */
     void completeReturn(UUID orderId);
+
+    /** Any scan of the order's parcel, by its carrier code, at a carrier time of the test's choosing. */
+    void scan(UUID orderId, String scan, Instant occurredAt);
+
+    /** Sends the rest of the parcel's scenario (LLD §8.9), as the simulator's clock would, one scan at a time. */
+    void followScenario(UUID orderId);
 }

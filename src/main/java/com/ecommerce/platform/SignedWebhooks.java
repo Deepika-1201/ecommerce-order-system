@@ -1,6 +1,8 @@
-package com.ecommerce.payments.web;
+package com.ecommerce.platform;
 
-import com.ecommerce.payments.gateway.PaymentsProperties;
+import jakarta.servlet.http.HttpServletRequest;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
@@ -13,27 +15,42 @@ import java.util.HexFormat;
 import java.util.List;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
-import org.springframework.stereotype.Component;
+import org.springframework.http.HttpStatus;
 
 /**
- * Checks {@code PG-Signature: t=<unix seconds>,v1=<hex>[,v1=<hex>]}: the timestamp within the tolerance of now, either
- * way, and one {@code v1} equal to {@code HMAC-SHA256(secret, t + "." + body)} for one of the configured secrets,
- * compared in constant time (LLD §7.7).
+ * What the webhook endpoints share (LLD §7.7, §8.8): a body read up to 64 KB, and the signature
+ * {@code t=<unix seconds>,v1=<hex>[,v1=<hex>]}. The timestamp must be within the tolerance of now, either way, and one
+ * {@code v1} must equal {@code HMAC-SHA256(secret, t + "." + body)} for one of the secrets, compared in constant time.
  */
-@Component
-class WebhookSignature {
+public final class SignedWebhooks {
+
+    public static final int MAX_BODY_BYTES = 64 * 1024;
 
     private final List<String> secrets;
     private final Duration tolerance;
     private final Clock clock;
 
-    WebhookSignature(PaymentsProperties properties, Clock clock) {
-        this.secrets = properties.gateway().webhookSecrets();
-        this.tolerance = properties.webhookTolerance();
+    public SignedWebhooks(List<String> secrets, Duration tolerance, Clock clock) {
+        this.secrets = List.copyOf(secrets);
+        this.tolerance = tolerance;
         this.clock = clock;
     }
 
-    boolean verify(String header, byte[] body) {
+    /** The body, refused with {@code 413 payload_too_large} beyond 64 KB before the rest is read. */
+    public static byte[] read(HttpServletRequest request) throws IOException {
+        if (request.getContentLengthLong() > MAX_BODY_BYTES) {
+            throw tooLarge();
+        }
+        try (InputStream in = request.getInputStream()) {
+            byte[] body = in.readNBytes(MAX_BODY_BYTES + 1);
+            if (body.length > MAX_BODY_BYTES) {
+                throw tooLarge();
+            }
+            return body;
+        }
+    }
+
+    public boolean verify(String header, byte[] body) {
         if (header == null || secrets.isEmpty()) {
             return false;
         }
@@ -97,5 +114,10 @@ class WebhookSignature {
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("HMAC-SHA256 is unavailable", e);
         }
+    }
+
+    private static ApiException tooLarge() {
+        return new ApiException(HttpStatus.CONTENT_TOO_LARGE, "payload_too_large",
+                "A webhook body may have at most " + MAX_BODY_BYTES + " bytes");
     }
 }

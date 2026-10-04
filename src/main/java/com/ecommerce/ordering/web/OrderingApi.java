@@ -1,6 +1,8 @@
 package com.ecommerce.ordering.web;
 
 import com.ecommerce.customer.AddressSnapshot;
+import com.ecommerce.fulfillment.ShipmentStatus;
+import com.ecommerce.fulfillment.Shipments.ShipmentView;
 import com.ecommerce.ordering.domain.CancelCode;
 import com.ecommerce.ordering.domain.Order;
 import com.ecommerce.ordering.domain.OrderReason;
@@ -102,6 +104,22 @@ final class OrderingApi {
     record OrderRefundResponse(long amountPaise, RefundStatus status) {
     }
 
+    /** The order's shipment once the order is confirmed: the carrier's AWB once booked, and its tracking. */
+    record OrderShipmentResponse(ShipmentStatus status, String carrier, String awb,
+                                 List<OrderTrackingResponse> tracking) {
+
+        static OrderShipmentResponse of(ShipmentView shipment) {
+            return shipment == null ? null
+                    : new OrderShipmentResponse(shipment.status(), shipment.carrier(), shipment.awb(),
+                            shipment.tracking().stream().map(entry -> new OrderTrackingResponse(entry.status(),
+                                    entry.at(), entry.location())).toList());
+        }
+    }
+
+    /** A step the parcel took, newest first. */
+    record OrderTrackingResponse(ShipmentStatus status, Instant at, String location) {
+    }
+
     /**
      * {@code reason} with {@code REJECTED} and {@code CANCELLED}; {@code unavailable_sku} with {@code OUT_OF_STOCK};
      * {@code checkout_url} while {@code AWAITING_PAYMENT}; {@code customer_id} for support only.
@@ -125,6 +143,7 @@ final class OrderingApi {
             OrderAddressResponse billingAddress,
             URI checkoutUrl,
             OrderRefundResponse refund,
+            OrderShipmentResponse shipment,
             Instant placedAt,
             Instant updatedAt) {
 
@@ -158,6 +177,7 @@ final class OrderingApi {
                     order.checkoutUrl() == null ? null : URI.create(order.checkoutUrl()),
                     order.refundStatus() == null ? null
                             : new OrderRefundResponse(order.refundAmountPaise(), order.refundStatus()),
+                    OrderShipmentResponse.of(view.shipment()),
                     order.placedAt(), order.updatedAt());
         }
     }

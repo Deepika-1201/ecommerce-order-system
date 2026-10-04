@@ -3,6 +3,7 @@ package com.ecommerce.ordering.domain;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.ecommerce.fulfillment.ShipmentMessages;
 import com.ecommerce.fulfillment.ShipmentMessages.CancelShipment;
 import com.ecommerce.fulfillment.ShipmentMessages.CreateShipment;
 import com.ecommerce.fulfillment.ShipmentMessages.ShipmentCancelRefused;
@@ -85,6 +86,8 @@ class OrderProcessTests {
     private static final long TOTAL = 123_456;
     private static final List<StockReservations.Line> LINES =
             List.of(new StockReservations.Line("SKU-A", 2), new StockReservations.Line("SKU-B", 1));
+    private static final CreateShipment CREATE_SHIPMENT = new CreateShipment(ORDER, ADDRESS,
+            List.of(new ShipmentMessages.Line("SKU-A", 2), new ShipmentMessages.Line("SKU-B", 1)));
 
     private static final StockReserved STOCK_RESERVED = new StockReserved(ORDER, RESERVATION, HOLD_EXPIRY);
     private static final StockReservationFailed STOCK_SHORT = new StockReservationFailed(ORDER, "SKU-B", 0);
@@ -389,8 +392,7 @@ class OrderProcessTests {
         void aCommittedHoldConfirmsTheOrderCommitsTheCouponAndBooksTheShipment() {
             OrderProcess process = decide(committing(), COMMITTED);
 
-            assertThat(process.commands())
-                    .containsExactly(new CommitCoupon(ORDER), new CreateShipment(ORDER, ADDRESS));
+            assertThat(process.commands()).containsExactly(new CommitCoupon(ORDER), CREATE_SHIPMENT);
             assertState(process, OrderStatus.CONFIRMED, null, Step.AWAITING_HANDOVER,
                     NOW.plus(OrderProcess.HANDOVER_TIMEOUT));
         }
@@ -399,7 +401,7 @@ class OrderProcessTests {
         void withoutACouponOnlyTheShipmentIsBooked() {
             Scenario committing = orderWithoutCoupon().then(STOCK_RESERVED, PAYMENT_CREATED, PAYMENT_SUCCEEDED);
 
-            assertThat(decide(committing, COMMITTED).commands()).containsExactly(new CreateShipment(ORDER, ADDRESS));
+            assertThat(decide(committing, COMMITTED).commands()).containsExactly(CREATE_SHIPMENT);
         }
 
         @Test

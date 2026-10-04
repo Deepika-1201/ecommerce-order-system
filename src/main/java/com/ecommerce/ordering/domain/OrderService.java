@@ -2,6 +2,7 @@ package com.ecommerce.ordering.domain;
 
 import com.ecommerce.customer.AddressSnapshot;
 import com.ecommerce.customer.Customers;
+import com.ecommerce.fulfillment.Shipments;
 import com.ecommerce.inventory.StockReservations;
 import com.ecommerce.ordering.domain.OrderProcess.CancelOutcome;
 import com.ecommerce.platform.ApiException;
@@ -35,16 +36,18 @@ public class OrderService {
     private final OrderProcesses processes;
     private final Quotes quotes;
     private final Customers customers;
+    private final Shipments shipments;
     private final AuditLog audit;
     private final OrderingProperties settings;
     private final Clock clock;
 
     OrderService(OrderRepository orders, OrderProcesses processes, Quotes quotes, Customers customers,
-            AuditLog audit, OrderingProperties settings, Clock clock) {
+            Shipments shipments, AuditLog audit, OrderingProperties settings, Clock clock) {
         this.orders = orders;
         this.processes = processes;
         this.quotes = quotes;
         this.customers = customers;
+        this.shipments = shipments;
         this.audit = audit;
         this.settings = settings;
         this.clock = clock;
@@ -71,6 +74,10 @@ public class OrderService {
                     "The delivery address is in " + delivery.state().displayName() + ", but the quote's GST is for "
                             + quote.deliveryState().displayName() + ": quote the cart for the address's state.");
         }
+        if (!shipments.serviceable(delivery.pinCode())) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT, "address_not_serviceable",
+                    "The carrier does not deliver to PIN code " + delivery.pinCode() + ": choose another address.");
+        }
         AddressSnapshot billing = billingAddressId == null ? delivery : snapshot(customerId, billingAddressId);
         UUID orderId = Ids.newId();
         Order order = new Order(orderId, orders.nextNumber(), customerId, quoteId, OrderStatus.PLACED, null, null,
@@ -89,7 +96,7 @@ public class OrderService {
                     "An order was already placed from this quote.");
         }
         processes.publish(process, Correlation.start(orderId.toString()));
-        return new OrderView(order, delivery, billing);
+        return new OrderView(order, delivery, billing, null);
     }
 
     /** The customer cancels one of their orders (LLD §6.6). */
@@ -180,7 +187,7 @@ public class OrderService {
         AddressSnapshot billing = order.billingAddressId().equals(order.deliveryAddressId())
                 ? delivery
                 : customers.addressSnapshot(order.billingAddressId()).orElseThrow();
-        return new OrderView(order, delivery, billing);
+        return new OrderView(order, delivery, billing, shipments.ofOrder(order.id()).orElse(null));
     }
 
     private static ApiException notFound() {

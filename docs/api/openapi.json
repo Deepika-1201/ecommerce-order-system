@@ -850,6 +850,9 @@
           "refund" : {
             "$ref" : "#/components/schemas/OrderRefundResponse"
           },
+          "shipment" : {
+            "$ref" : "#/components/schemas/OrderShipmentResponse"
+          },
           "shipping" : {
             "$ref" : "#/components/schemas/OrderShippingResponse"
           },
@@ -873,6 +876,26 @@
           "updated_at" : {
             "format" : "date-time",
             "type" : "string"
+          }
+        }
+      },
+      "OrderShipmentResponse" : {
+        "properties" : {
+          "awb" : {
+            "type" : "string"
+          },
+          "carrier" : {
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "PENDING_BOOKING", "BOOKING_FAILED", "BOOKED", "PACKED", "HANDED_OVER", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERY_ATTEMPT_FAILED", "DELIVERED", "RTO_IN_TRANSIT", "RTO_DELIVERED", "CANCELLED" ],
+            "type" : "string"
+          },
+          "tracking" : {
+            "items" : {
+              "$ref" : "#/components/schemas/OrderTrackingResponse"
+            },
+            "type" : "array"
           }
         }
       },
@@ -979,6 +1002,21 @@
           "taxable_value_paise" : {
             "format" : "int64",
             "type" : "integer"
+          }
+        }
+      },
+      "OrderTrackingResponse" : {
+        "properties" : {
+          "at" : {
+            "format" : "date-time",
+            "type" : "string"
+          },
+          "location" : {
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "PENDING_BOOKING", "BOOKING_FAILED", "BOOKED", "PACKED", "HANDED_OVER", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERY_ATTEMPT_FAILED", "DELIVERED", "RTO_IN_TRANSIT", "RTO_DELIVERED", "CANCELLED" ],
+            "type" : "string"
           }
         }
       },
@@ -1384,6 +1422,45 @@
         },
         "required" : [ "quantity" ]
       },
+      "ShipmentAddressResponse" : {
+        "properties" : {
+          "city" : {
+            "type" : "string"
+          },
+          "landmark" : {
+            "type" : "string"
+          },
+          "line1" : {
+            "type" : "string"
+          },
+          "line2" : {
+            "type" : "string"
+          },
+          "phone" : {
+            "type" : "string"
+          },
+          "pin_code" : {
+            "type" : "string"
+          },
+          "recipient_name" : {
+            "type" : "string"
+          },
+          "state_code" : {
+            "type" : "string"
+          }
+        }
+      },
+      "ShipmentLineResponse" : {
+        "properties" : {
+          "quantity" : {
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "sku" : {
+            "type" : "string"
+          }
+        }
+      },
       "StateList" : {
         "properties" : {
           "items" : {
@@ -1553,6 +1630,50 @@
           },
           "url" : {
             "format" : "uri",
+            "type" : "string"
+          }
+        }
+      },
+      "WarehouseShipmentList" : {
+        "properties" : {
+          "items" : {
+            "items" : {
+              "$ref" : "#/components/schemas/WarehouseShipmentResponse"
+            },
+            "type" : "array"
+          },
+          "next_cursor" : {
+            "type" : "string"
+          }
+        }
+      },
+      "WarehouseShipmentResponse" : {
+        "properties" : {
+          "awb" : {
+            "type" : "string"
+          },
+          "carrier" : {
+            "type" : "string"
+          },
+          "delivery_address" : {
+            "$ref" : "#/components/schemas/ShipmentAddressResponse"
+          },
+          "id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "lines" : {
+            "items" : {
+              "$ref" : "#/components/schemas/ShipmentLineResponse"
+            },
+            "type" : "array"
+          },
+          "order_id" : {
+            "format" : "uuid",
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ "PENDING_BOOKING", "BOOKING_FAILED", "BOOKED", "PACKED", "HANDED_OVER", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERY_ATTEMPT_FAILED", "DELIVERED", "RTO_IN_TRANSIT", "RTO_DELIVERED", "CANCELLED" ],
             "type" : "string"
           }
         }
@@ -3420,6 +3541,143 @@
         "tags" : [ "Support" ]
       }
     },
+    "/v1/support/shipments/{id}/booking" : {
+      "post" : {
+        "operationId" : "redriveShipmentBooking",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "202" : {
+            "description" : "The booking is pending again"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Book a failed booking again, with a new 24-hour budget",
+        "tags" : [ "Support shipments" ]
+      }
+    },
+    "/v1/warehouse/shipments" : {
+      "get" : {
+        "operationId" : "listWarehouseShipments",
+        "parameters" : [ {
+          "description" : "BOOKED or PACKED",
+          "in" : "query",
+          "name" : "status",
+          "required" : false,
+          "schema" : {
+            "default" : "BOOKED",
+            "enum" : [ "PENDING_BOOKING", "BOOKING_FAILED", "BOOKED", "PACKED", "HANDED_OVER", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERY_ATTEMPT_FAILED", "DELIVERED", "RTO_IN_TRANSIT", "RTO_DELIVERED", "CANCELLED" ],
+            "type" : "string"
+          }
+        }, {
+          "in" : "query",
+          "name" : "limit",
+          "required" : false,
+          "schema" : {
+            "default" : 20,
+            "format" : "int32",
+            "maximum" : 50,
+            "minimum" : 1,
+            "type" : "integer"
+          }
+        }, {
+          "in" : "query",
+          "name" : "cursor",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WarehouseShipmentList"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "List shipments to pack (BOOKED, the default) or to hand over (PACKED)",
+        "tags" : [ "Warehouse shipments" ]
+      }
+    },
+    "/v1/warehouse/shipments/{id}/handed-over" : {
+      "post" : {
+        "operationId" : "markShipmentHandedOver",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WarehouseShipmentResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Mark a packed shipment handed over to the carrier: the order is SHIPPED",
+        "tags" : [ "Warehouse shipments" ]
+      }
+    },
+    "/v1/warehouse/shipments/{id}/packed" : {
+      "post" : {
+        "operationId" : "markShipmentPacked",
+        "parameters" : [ {
+          "in" : "path",
+          "name" : "id",
+          "required" : true,
+          "schema" : {
+            "format" : "uuid",
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/WarehouseShipmentResponse"
+                }
+              }
+            },
+            "description" : "OK"
+          }
+        },
+        "security" : [ {
+          "bearer" : [ ]
+        } ],
+        "summary" : "Mark a booked shipment packed",
+        "tags" : [ "Warehouse shipments" ]
+      }
+    },
     "/v1/warehouse/stock" : {
       "get" : {
         "operationId" : "listStock",
@@ -3635,6 +3893,38 @@
         "tags" : [ "Warehouse" ]
       }
     },
+    "/v1/webhooks/carrier" : {
+      "post" : {
+        "operationId" : "receiveCarrierEvent",
+        "parameters" : [ {
+          "description" : "t=<unix seconds>,v1=<hex HMAC-SHA256 of t.body>; one v1 per valid secret",
+          "in" : "header",
+          "name" : "Carrier-Signature",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "type" : "object"
+              }
+            }
+          },
+          "description" : "The carrier's event, as it signed it",
+          "required" : true
+        },
+        "responses" : {
+          "200" : {
+            "description" : "Stored, or already known"
+          }
+        },
+        "summary" : "Receive a tracking scan from the carrier; a known event id changes nothing",
+        "tags" : [ "Carrier webhooks" ]
+      }
+    },
     "/v1/webhooks/payment-gateway" : {
       "post" : {
         "operationId" : "receiveGatewayEvent",
@@ -3682,6 +3972,21 @@
     "description" : "Role support. Any order, as its customer sees it plus the customer id; cancellations take a reason code and an Idempotency-Key, and are audit-logged.",
     "name" : "Support"
   }, {
+    "description" : "No token needed. Cacheable for 30 s, with ETags.",
+    "name" : "Catalog"
+  }, {
+    "description" : "Role warehouse. Stock levels, receipts and adjustments, and each SKU's movements. Receipts and adjustments need an Idempotency-Key.",
+    "name" : "Warehouse"
+  }, {
+    "description" : "Tracking scans from the carrier, signed with Carrier-Signature",
+    "name" : "Carrier webhooks"
+  }, {
+    "description" : "No access token: the Cart-Token header is the credential. An unknown token is 404.",
+    "name" : "Guest cart"
+  }, {
+    "description" : "Role warehouse. Shipments to pack and to hand over to the carrier, oldest first. A mark the shipment has already passed answers 200, unchanged.",
+    "name" : "Warehouse shipments"
+  }, {
     "description" : "The signed-in customer's cart and its quotes. Responses carry the version as ETag; If-Match makes a write conditional.",
     "name" : "My cart"
   }, {
@@ -3691,16 +3996,10 @@
     "description" : "The signed-in customer's orders. Placing and cancelling need an Idempotency-Key; both answer 202 and the order moves on by itself, so follow its status.",
     "name" : "My orders"
   }, {
-    "description" : "No token needed. Cacheable for 30 s, with ETags.",
-    "name" : "Catalog"
+    "description" : "Role support. Bookings that failed, booked again; audit-logged.",
+    "name" : "Support shipments"
   }, {
     "description" : "The calling customer's profile and addresses. Another customer's address is 404.",
     "name" : "Me"
-  }, {
-    "description" : "Role warehouse. Stock levels, receipts and adjustments, and each SKU's movements. Receipts and adjustments need an Idempotency-Key.",
-    "name" : "Warehouse"
-  }, {
-    "description" : "No access token: the Cart-Token header is the credential. An unknown token is 404.",
-    "name" : "Guest cart"
   } ]
 }

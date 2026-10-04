@@ -72,6 +72,13 @@ class OrderFlowTests extends OrderingTest {
         assertThat(delivered.get("status").asString()).isEqualTo("DELIVERED");
         assertThat(delivered.has("reason")).isFalse();
         assertThat(delivered.has("refund")).isFalse();
+        JsonNode shipment = delivered.get("shipment");
+        assertThat(shipment.get("status").asString()).isEqualTo("DELIVERED");
+        assertThat(shipment.get("carrier").asString()).isEqualTo("Simulated Carrier");
+        assertThat(shipment.get("awb").asString()).matches("SIM[0-9]{10}");
+        assertThat(shipment.get("tracking").valueStream().map(step -> step.get("status").asString()))
+                .as("newest first")
+                .containsExactly("DELIVERED", "OUT_FOR_DELIVERY", "IN_TRANSIT", "HANDED_OVER", "PACKED");
         assertThat(step(orderId)).isEqualTo("DONE");
         assertThat(refunds(orderId)).isEmpty();
         assertCoupon(couponId, 0, 1);
@@ -103,6 +110,32 @@ class OrderFlowTests extends OrderingTest {
         assertThat(order(asha, orderId).get("refund").get("status").asString()).isEqualTo("INITIATED");
         assertThat(step(orderId)).isEqualTo("DONE");
         assertThat(refunds(orderId)).containsExactly(entry("RETURNED_TO_ORIGIN", grandTotal(orderId)));
+    }
+
+    @Test
+    void aParcelTheCarrierCannotDeliverComesBackRestockedAndRefunded() {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID quoteId = quote(asha, KARNATAKA, null, sku, 2);
+        UUID orderId = id(expect(202, place(asha, quoteId, address(asha, KARNATAKA, "560005"), newKey())));
+        deliver();
+        payments.succeed(orderId);
+        deliver();
+        shipments.handOver(orderId);
+        deliver();
+
+        shipments.followScenario(orderId);
+        deliver();
+        payments.succeedRefund(orderId);
+        deliver();
+
+        JsonNode returned = order(asha, orderId);
+        assertThat(returned.get("status").asString()).isEqualTo("RETURNED_TO_ORIGIN");
+        assertThat(returned.get("shipment").get("status").asString()).isEqualTo("RTO_DELIVERED");
+        assertThat(returned.get("refund").get("status").asString()).isEqualTo("SUCCEEDED");
+        assertThat(returned.get("refund").get("amount_paise").asLong()).isEqualTo(grandTotal(orderId));
+        assertThat(reservation(orderId)).isEqualTo("RETURNED");
+        assertStock(sku, 5, 0);
+        assertThat(step(orderId)).isEqualTo("DONE");
     }
 
     @Test

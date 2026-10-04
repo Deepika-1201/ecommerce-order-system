@@ -1,5 +1,6 @@
 package com.ecommerce.ordering.domain;
 
+import com.ecommerce.fulfillment.ShipmentMessages;
 import com.ecommerce.fulfillment.ShipmentMessages.CancelShipment;
 import com.ecommerce.fulfillment.ShipmentMessages.CreateShipment;
 import com.ecommerce.fulfillment.ShipmentMessages.ShipmentCancelRefused;
@@ -327,7 +328,9 @@ final class OrderProcess {
                     if (order.couponId() != null) {
                         send(new CommitCoupon(orderId()));
                     }
-                    send(new CreateShipment(orderId(), order.deliveryAddressId()));
+                    send(new CreateShipment(orderId(), order.deliveryAddressId(), order.lines().stream()
+                            .map(line -> new ShipmentMessages.Line(line.sku(), line.quantity()))
+                            .toList()));
                     moveTo(OrderStatus.CONFIRMED);
                     enter(Step.AWAITING_HANDOVER, now);
                 }

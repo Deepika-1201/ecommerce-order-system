@@ -3,6 +3,7 @@ package com.ecommerce.ordering;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.ecommerce.fulfillment.ShipmentMessages;
 import com.ecommerce.fulfillment.ShipmentMessages.CancelShipment;
 import com.ecommerce.fulfillment.ShipmentMessages.CreateShipment;
 import com.ecommerce.fulfillment.ShipmentMessages.ShipmentCancelRefused;
@@ -352,8 +353,8 @@ class ParticipantTests extends OrderingTest {
     }
 
     @Test
-    void aShipmentIsBookedAtOnceAndCancelledUntilItIsHandedOver() {
-        command(new CreateShipment(orderId, UUID.randomUUID()));
+    void aShipmentIsBookedByItsTaskAndCancelledUntilItIsHandedOver() {
+        command(createShipment(orderId));
         assertThat(shipment(orderId)).isEqualTo("BOOKED");
         assertThat(replies()).isEmpty();
 
@@ -370,7 +371,7 @@ class ParticipantTests extends OrderingTest {
     @Test
     void aCancellationThatArrivesBeforeTheShipmentIsCreatedStands() {
         command(new CancelShipment(orderId));
-        command(new CreateShipment(orderId, UUID.randomUUID()));
+        command(createShipment(orderId));
 
         assertThat(replies()).extracting(Reply::type).containsExactly("fulfillment.shipment-cancelled");
         assertThat(shipment(orderId)).isEqualTo("CANCELLED");
@@ -378,23 +379,28 @@ class ParticipantTests extends OrderingTest {
 
     @Test
     void aHandedOverShipmentCannotBeCancelledAndMovesOnAsTheParcelDoes() {
-        command(new CreateShipment(orderId, UUID.randomUUID()));
+        command(createShipment(orderId));
         shipments.handOver(orderId);
         command(new CancelShipment(orderId));
         shipments.startReturn(orderId);
         shipments.completeReturn(orderId);
         UUID delivered = UUID.randomUUID();
-        command(new CreateShipment(delivered, UUID.randomUUID()), delivered);
+        command(createShipment(delivered), delivered);
         shipments.handOver(delivered);
         shipments.deliver(delivered);
+        deliverExcept(REPLIES);
 
         assertThat(replies()).extracting(Reply::type).containsExactly("fulfillment.shipment-handed-over",
                 "fulfillment.shipment-cancel-refused", "fulfillment.shipment-return-initiated",
                 "fulfillment.shipment-returned-to-origin");
-        assertThat(shipment(orderId)).isEqualTo("RETURNED");
+        assertThat(shipment(orderId)).isEqualTo("RTO_DELIVERED");
         assertThat(shipment(delivered)).isEqualTo("DELIVERED");
         assertThatThrownBy(() -> shipments.startReturn(delivered)).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(() -> shipments.deliver(orderId)).isInstanceOf(IllegalStateException.class);
+    }
+
+    private CreateShipment createShipment(UUID order) {
+        return new CreateShipment(order, deliverySnapshot("560038"), List.of(new ShipmentMessages.Line("SKU-A", 1)));
     }
 
     /** A payment of ₹1,234 for a new order, payable for 15 minutes; the order's id. */

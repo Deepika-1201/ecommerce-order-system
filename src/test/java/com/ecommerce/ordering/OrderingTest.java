@@ -77,7 +77,8 @@ public abstract class OrderingTest extends IntegrationTest {
     void emptyStores() {
         jdbc.sql("""
                 TRUNCATE ordering.order_processes, ordering.order_lines, ordering.orders,
-                         payments.refunds, payments.payment_records, fulfillment.simulated_shipments,
+                         payments.refunds, payments.payment_records, fulfillment.tracking_events,
+                         fulfillment.shipment_lines, fulfillment.shipments, fulfillment.simulated_parcels,
                          inventory.reservation_lines, inventory.reservations, inventory.stock_movements,
                          inventory.stock_items, cart.cart_lines, cart.carts, pricing.quote_lines, pricing.quotes,
                          pricing.coupon_redemptions, pricing.coupons, catalog.product_images, catalog.variants,
@@ -116,10 +117,37 @@ public abstract class OrderingTest extends IntegrationTest {
     // Customers, carts and quotes.
 
     protected String address(String token, String stateCode) {
+        return address(token, stateCode, "560038");
+    }
+
+    /** An address with this PIN code, whose last digit picks the carrier simulator's scenario (LLD §8.9). */
+    protected String address(String token, String stateCode, String pinCode) {
         return expect(201, call("POST", "/v1/me/addresses", token, """
                 {"recipient_name": "Asha Rao", "phone": "9876543210", "line1": "12, 4th Cross, Indiranagar",
-                 "city": "Bengaluru", "state_code": "%s", "pin_code": "560038"}
-                """.formatted(stateCode))).get("id").asString();
+                 "city": "Bengaluru", "state_code": "%s", "pin_code": "%s"}
+                """.formatted(stateCode, pinCode))).get("id").asString();
+    }
+
+    /** A delivery address snapshot in Karnataka with this PIN code, as placement takes one (ADR-023); its id. */
+    protected UUID deliverySnapshot(String pinCode) {
+        UUID customer = UUID.randomUUID();
+        jdbc.sql("INSERT INTO customer.customers (id, subject, created_at, updated_at) "
+                        + "VALUES (:id, :subject, now(), now())")
+                .param("id", customer)
+                .param("subject", "snapshot-owner-" + customer)
+                .update();
+        UUID snapshot = UUID.randomUUID();
+        jdbc.sql("""
+                        INSERT INTO customer.address_snapshots (id, customer_id, recipient_name, phone, line1, city,
+                                                                state_code, pin_code, created_at)
+                        VALUES (:id, :customer, 'Asha Rao', '+919876543210', '12, 4th Cross, Indiranagar', 'Bengaluru',
+                                '29', :pinCode, now())
+                        """)
+                .param("id", snapshot)
+                .param("customer", customer)
+                .param("pinCode", pinCode)
+                .update();
+        return snapshot;
     }
 
     /** Sets the cart's line for the SKU, applies the coupon if there is one, and quotes for the state. */
@@ -267,7 +295,7 @@ public abstract class OrderingTest extends IntegrationTest {
     }
 
     protected String shipment(UUID orderId) {
-        return column("SELECT status FROM fulfillment.simulated_shipments WHERE order_id = :id", orderId);
+        return column("SELECT status FROM fulfillment.shipments WHERE order_id = :id", orderId);
     }
 
     /** The order's refunds that have a reason: reason to amount. */

@@ -1,6 +1,7 @@
 package com.ecommerce.fulfillment;
 
 import com.ecommerce.platform.MessageType;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -13,9 +14,20 @@ public final class ShipmentMessages {
     private ShipmentMessages() {
     }
 
-    /** Ship the order to its delivery address snapshot (ADR-023). No reply: the shipment's events follow. */
+    /**
+     * Ship the order's lines to its delivery address snapshot (ADR-023). No reply: the shipment's events follow
+     * (LLD §8.5).
+     */
     @MessageType(name = "fulfillment.create-shipment")
-    public record CreateShipment(UUID orderId, UUID deliveryAddressId) {
+    public record CreateShipment(UUID orderId, UUID deliveryAddressId, List<Line> lines) {
+
+        public CreateShipment {
+            lines = List.copyOf(lines);
+        }
+    }
+
+    /** A SKU, and how many of it the parcel holds. */
+    public record Line(String sku, int quantity) {
     }
 
     /** Cancel before the handover: {@link ShipmentCancelled} or {@link ShipmentCancelRefused}. */

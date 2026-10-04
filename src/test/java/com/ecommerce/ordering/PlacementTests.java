@@ -112,6 +112,25 @@ class PlacementTests extends OrderingTest {
     }
 
     @Test
+    void theCarrierMustServeTheDeliveryPinCode() {
+        String sku = product("Steel bottle", 59_900, 5);
+        UUID quoteId = quote(asha, KARNATAKA, null, sku, 1);
+        String unserviceable = address(asha, KARNATAKA, "560002");
+        int snapshots = snapshots();
+
+        assertCode(place(asha, quoteId, unserviceable, newKey()), 422, "address_not_serviceable");
+
+        assertThat(jdbc.sql("SELECT count(*) FROM ordering.orders").query(Integer.class).single()).isZero();
+        assertThat(snapshots()).as("the snapshot rolled back with the placement").isEqualTo(snapshots);
+        assertStock(sku, 5, 0);
+        expect(202, place(asha, quoteId, address(asha, KARNATAKA, "560017"), newKey()));
+    }
+
+    private int snapshots() {
+        return jdbc.sql("SELECT count(*) FROM customer.address_snapshots").query(Integer.class).single();
+    }
+
+    @Test
     void theOrderKeepsItsAddressesAsTheyWereWhenItWasPlaced() {
         String sku = product("Steel bottle", 59_900, 5);
         UUID quoteId = quote(asha, KARNATAKA, null, sku, 1);
