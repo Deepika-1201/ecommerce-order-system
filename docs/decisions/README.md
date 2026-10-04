@@ -25,7 +25,7 @@ Format: Context → Problem → Options considered → Decision → Trade-offs �
 | [ADR-019](ADR-019-rounding-and-allocation.md) | Integer paise, half-up rounding per line and tax component, largest-remainder discount allocation; totals are sums | Accepted |
 | [ADR-020](ADR-020-guest-cart-tokens.md) | Guest carts are opened by a secret cart token in a header, stored only as a hash | Accepted |
 | [ADR-021](ADR-021-stock-movements.md) | Every change to on-hand stock writes a movement beside the counters; `on_hand` equals their sum | Accepted |
-| [ADR-022](ADR-022-simulated-payments-and-fulfillment.md) | Payments and Fulfillment start as simulators behind their real messages, until phases 7 and 8 | Accepted |
+| [ADR-022](ADR-022-simulated-payments-and-fulfillment.md) | Payments and Fulfillment start as simulators behind their real messages, until phases 7 and 8 | Superseded by phases 7 and 8 ([ADR-025](ADR-025-carrier-simulator.md)) |
 | [ADR-023](ADR-023-order-address-snapshots.md) | Orders reference immutable address snapshots kept in the customer schema | Accepted |
 | [ADR-024](ADR-024-tracking-newest-reachable-scan.md) | A shipment applies a carrier scan only if it is newer and its status reachable along the state machine | Accepted |
 | [ADR-025](ADR-025-carrier-simulator.md) | The V1 carrier is a simulator in process, behind the carrier port, with its parcels in the database | Accepted |

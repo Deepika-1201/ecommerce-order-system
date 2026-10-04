@@ -1255,7 +1255,7 @@ Events the saga also consumes: `PaymentSucceeded`, `PaymentFailed`, `PaymentExpi
   - `CheckPayment` is new. It is the deadline's "poll the gateway" as a command, so that Payments decides how to ask (from phase 7, a task that calls the gateway).
   - Releases, coupon commits, handovers and restocks have no replies: only a bug can make them fail, the outbox delivers them, and a failure parks the message for an operator (§2.4). `ReservationReleased` is dropped, since nothing would consume it and the platform refuses a message nothing handles.
   - `ReservationExpired` is not published: the saga's deadline at the hold's expiry covers it (§6.7).
-  - `ShipmentBooked`, `ShipmentBookingFailed`, `RefundSucceeded` and `RefundFailed` arrive in phases 7 and 8, with the consumers that need them.
+  - `RefundSucceeded` and `RefundFailed` arrive in phase 7, with the consumers that need them. `ShipmentBooked` and `ShipmentBookingFailed` were to arrive in phase 8; it dropped them, since nothing consumes them (§8.2).
 - **Origins** (§2.3): the saga's commands come from aggregate `order`, with the process's version. Replies come from `reservation`, `coupon_redemption`, `payment` or `shipment`, keyed by the order id, with that record's version (0 for coupon redemptions, which have none).
 - **No order across message types.** Each type has its own handler, and the outbox orders messages per handler (§2.3), so a `PaymentSucceeded` can overtake the `PaymentCreated` before it. The saga defines what every message means in every step (§6.5).
 
@@ -1696,8 +1696,9 @@ Not yet:
 | Package | Holds |
 |---|---|
 | `fulfillment` | The messages (§6.2); `Shipments`, the reads Ordering uses (a shipment with its tracking, and serviceability); `ShipmentSimulator`, which now drives the warehouse and the carrier simulator in tests (§8.9) |
-| `fulfillment.domain` | Shipments and their tracking history, the command handlers, the tasks that call the carrier, and the one place that applies a scan (§8.6) |
-| `fulfillment.carrier` | The `Carrier` port and the carrier simulator |
+| `fulfillment.domain` | Shipments and their tracking history, the command handlers, the tasks that call the carrier, the warehouse's and support's operations, and the one place that applies a scan (§8.6) |
+| `fulfillment.carrier` | The `Carrier` port, the carrier simulator, and reading the carrier's events from the inbox |
+| `fulfillment.simulator` | What drives the simulator: `ShipmentSimulator` for tests, and the clock that advances parcels in the compose stacks (§8.9) |
 | `fulfillment.web` | The warehouse's and support's endpoints, and the tracking webhook |
 | `platform` | The webhook inbox, and now the signature check and the capped body read both webhooks use, moved from Payments |
 
@@ -1743,10 +1744,12 @@ Handlers run in the delivery transaction and never call the carrier. Tasks call 
 
 | Command | Handler | Task | Answer |
 |---|---|---|---|
-| `CreateShipment` | Inserts the shipment, `PENDING_BOOKING`, with its lines, once per order. A shipment cancelled before the create arrived stays cancelled. Schedules the booking | `fulfillment.book-shipment`: reads the delivery snapshot, books, and saves the AWB: `BOOKED` | None: the saga waits for the handover |
+| `CreateShipment` | Inserts the shipment, `PENDING_BOOKING`, with its lines, once per order. A shipment cancelled before the create arrived stays cancelled. Schedules the booking, whose task leaves alone a shipment that is no longer pending | `fulfillment.book-shipment`: reads the delivery snapshot, books, and saves the AWB: `BOOKED` | None: the saga waits for the handover |
 | `CancelShipment` | Not booked yet (`PENDING_BOOKING`, `BOOKING_FAILED`, or no shipment): `CANCELLED` at once. `BOOKED` or `PACKED`: cancel requested, and the task scheduled. Handed over or later: refused | `fulfillment.cancel-shipment`: cancels the booking. Accepted: `CANCELLED`. Refused as `picked_up`: refused, and the carrier's scans follow | `ShipmentCancelled` or `ShipmentCancelRefused`; a repeat answers the same |
 
-- **The booking budget (S8)** is 24 hours from creation. The task retries an unavailable carrier with backoff, 10 seconds doubling to an hour, up to 40 attempts, which outlast the budget.
+- **The booking budget (S8)** is 24 hours from creation. The task retries an unavailable carrier with the runner's backoff, 10 seconds doubling to an hour, up to 100 attempts.
+  - **Why 100:** the backoff's jitter can halve each wait, so 100 attempts span at least 45 hours, well past the budget. The 40 first designed could end within 16 hours, leaving the shipment pending with no alert.
+  - **Should the attempts run out anyway,** the last one fails the booking with the alert, rather than the task ending silently.
 - **When the budget runs out or the carrier refuses,** the shipment is `BOOKING_FAILED`. Fulfillment logs `shipment_booking_failed` at `ERROR` with the order and the reason. The order stays `CONFIRMED`: paid, with its stock committed (FR-FUL4).
 - **Support re-drives a failed booking** with `POST /v1/support/shipments/{id}/booking`: back to `PENDING_BOOKING` with a new budget, audit-logged. Support can also cancel the order, which cancels the shipment and refunds (§6.6).
 - **A booking that completes after a cancellation** (the cancel came while the carrier was being called) is cancelled at the carrier, best effort, and logged.
@@ -1757,7 +1760,7 @@ Handlers run in the delivery transaction and never call the carrier. Tasks call 
 Scans from the webhook and from the simulator end in one method ([ADR-024](decisions/ADR-024-tracking-newest-reachable-scan.md); amends the rule of order lifecycle §4):
 
 1. **Lock the shipment,** found by the reference the scan carries. An unknown reference is logged, and the event marked processed.
-2. **Record the scan** in the tracking history, once per carrier event id.
+2. **Record the scan** in the tracking history, once per carrier event id. A task that runs again after its commit records nothing new, and its scan, no longer newer than the last applied one, does not apply twice.
 3. **Apply it only if both hold:**
    - its time is after the last applied scan's;
    - its status is **reachable** from the current status along the state machine's arrows, skipping states the carrier did not scan.
@@ -1840,6 +1843,7 @@ The event, the simulator's contract:
   - `startReturn`: `delivery_attempt_failed`, `rto_in_transit`.
   - `completeReturn`: `rto_delivered`.
   - New: `scan(order, scan, occurredAt)`, any scan at any time, for out-of-order cases.
+  - New: `followScenario(order)`, the rest of the parcel's scenario, one scan at a time, as the clock would send it.
 
   The phase 6 methods refuse what the carrier could not do (a delivery after a return) with `IllegalStateException`; `scan` refuses nothing.
 - **Cancel** is refused once the simulator has scanned the parcel.
@@ -1906,16 +1910,57 @@ The event, the simulator's contract:
 
 | Test | Proves |
 |---|---|
-| `TrackingTests` (unit) | §8.6 for every status against every scan, with an earlier, equal and later time; the milestones every jump publishes |
-| `TrackingProperties` (jqwik) | Itineraries through the state machine, delivered in random order with duplicates: the status never moves backwards, and ends where the newest reachable scan says |
-| `ShipmentTests` | §8.5 through messages: booking with retries and its budget, refusals and the re-drive; cancellation before booking, while booked or packed (accepted, or refused because the carrier has the parcel), after the handover; a booking completed after its cancellation |
-| `WarehouseTests` | §8.7 over HTTP: the lists, marks and their repeats, invalid states and cancellations, access by role, audit entries |
-| `CarrierWebhookTests` | §8.8 over HTTP: signatures, the cap, malformed bodies, duplicates, scans out of order applied by their tasks |
-| `FulfillmentSchemaTests` | Each check of the fulfillment schema |
-| `PlacementTests` | `422 address_not_serviceable`, with nothing reserved |
+| `TrackingTests` (unit, 4) | §8.6 for every status against every scan: a first scan, and scans earlier than, at the same time as and later than the last applied one; the milestones each jump publishes, in order; the carrier's scan codes; which statuses have passed each warehouse mark |
+| `TrackingProperties` (jqwik) | Journeys with up to three failed attempts, delivered or returned, cut short at any scan, their scans delivered in random order with up to three repeats: the status only moves forward, ends where the newest scan says, and publishes each milestone once, in order |
+| `ShipmentTests` (16) | §8.5 and the simulator's scenarios through messages: booked with its lines under the shipment's reference, a known reference answered with its AWB; an outage retried until the carrier books; a refusal, a spent budget and a carrier down for every attempt, each failing the booking with the alert; support's re-drive; cancellation before booking, while booked or packed (accepted, refused because the carrier has the parcel, or overtaken by a scan), after the handover; a booking completed after its cancellation; scans out of order, a reattempt, a return to origin; scans of another shipment or in an unknown code |
+| `WarehouseShipmentTests` (4) | §8.7 over HTTP: the lists, oldest first; marks, their repeats and audit entries; marks the shipment cannot take; access by role |
+| `CarrierWebhookTests` (3) | §8.8 over HTTP: scans out of order and repeated, applied by their tasks; unsigned, old and forged scans; signed bodies that are not events, or over the cap |
+| `FulfillmentSchemaTests` (6) | Each check of the fulfillment schema, the simulator's table too |
+| `FulfillmentPropertiesTests` (2) | The defaults: the simulator still, every webhook refused; blank secrets dropped, and none shown |
+| `SimulatorClockTests` (1) | Each tick moves only handed-over parcels, one scan on |
+| `PlacementTests` | `422 address_not_serviceable`, with no order, no snapshot and nothing reserved |
 | `OrderFlowTests`, `RefundTests` | Through the carrier simulator: delivered; returned to origin, restocked and refunded |
 | `ParticipantTests` | Fulfillment's handlers as §8.5 says |
+| Phase 6's and 7's ordering tests | What they proved, now through the warehouse and the carrier simulator |
 | The ecosystem demo, in CI | §8.14 |
+
+A mutation check broke 81 rules one at a time, and the tests caught all 81:
+
+| Where | Rules |
+|---|---|
+| Schema | 14 |
+| State machine and scan codes | 11 |
+| Booking and cancel tasks | 9 |
+| Warehouse's and support's operations | 9 |
+| Carrier simulator | 8 |
+| Queries | 7 |
+| Tracking rule | 5 |
+| Command handlers | 5 |
+| Applying scans and marks | 3 |
+| Webhook, access, settings, Ordering's service | 2 each |
+| The saga's command, the order's response | 1 each |
+
+Listing them first:
+
+- **Found a booking that could end silently** (§8.5).
+- **Exposed 7 untested rules,** now tested: the simulator's clock, scans missing fields, blank secrets, the order showing only applied scans, a known reference booked once, unique AWBs, the simulator's table.
+- **Removed 2 redundant checks:**
+  - the create handler scheduled the booking only for a pending shipment, which the task checks anyway;
+  - recording a scan reported a repeated event, which cannot apply again (§8.6).
+
+Not run, as equivalent:
+
+- **The last scan's time kept when a mark moves the shipment.** A mark never follows an applied scan: every scan moves the shipment past both marks.
+- **A cancel refused for another reason, read as picked up.** The simulator refuses cancels only as `picked_up`.
+- **The pending check when a booking fails.** Only a cancellation racing the task reaches it.
+- **In the out-of-order scenario:**
+  - the late scans' earlier times (nothing applies after `delivered` anyway);
+  - its repeated event (the inbox drops it);
+  - the simulator keeping each scan after the last (the clock has moved on anyway).
+- **Another event type read as a scan.** It lacks a scan's fields, so the apply task drops it.
+- **The warehouse paths' access rule.** Inventory's `/v1/warehouse/**` rule covers them.
+
+The signature check and capped read, now shared, were mutated in phase 7 (§7.16).
 
 ### 8.16 Exit criteria
 

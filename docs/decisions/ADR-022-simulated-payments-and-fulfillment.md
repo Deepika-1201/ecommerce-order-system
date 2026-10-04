@@ -1,6 +1,6 @@
 # ADR-022: Payments and Fulfillment start as simulators behind their real messages
 
-- **Status:** Accepted (2026-10-03)
+- **Status:** Superseded (2026-10-04): phase 7 replaced the payment simulator with the gateway adapter ([ADR-002](ADR-002-payment-gateway-integration.md)), and phase 8 the shipment simulator with the carrier port and its simulator ([ADR-025](ADR-025-carrier-simulator.md))
 - **Date:** 2026-10-03
 - **Related:** [ADR-007](ADR-007-saga-orchestration.md), [ADR-002](ADR-002-payment-gateway-integration.md), [implementation plan](../implementation-plan.md), [LLD §6.8](../low-level-design.md#68-participants)
 
