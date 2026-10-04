@@ -53,6 +53,24 @@ class GatewaySelectionTests {
     }
 
     @Test
+    void blankSettingsCountAsUnset() {
+        context.withPropertyValues("ecom.payments.gateway.base-url= ")
+                .run(started -> {
+                    assertThat(started).hasNotFailed();
+                    assertThat(started.getBean(PaymentGateway.class)).isInstanceOf(FakePaymentGateway.class);
+                });
+        context.withPropertyValues("ecom.payments.gateway.base-url=http://payment-gateway:8090",
+                        "ecom.payments.gateway.api-key=sk_test_selection",
+                        "ecom.payments.gateway.webhook-secrets=whsec_selection, ")
+                .run(started -> assertThat(started.getBean(PaymentsProperties.class).gateway().webhookSecrets())
+                        .containsExactly("whsec_selection"));
+        context.withPropertyValues("ecom.payments.gateway.base-url=http://payment-gateway:8090",
+                        "ecom.payments.gateway.api-key=sk_test_selection",
+                        "ecom.payments.gateway.webhook-secrets= , ")
+                .run(started -> assertThat(started).hasFailed());
+    }
+
+    @Test
     void theCheckoutReturnsToTheStorefrontsPageForTheOrder() {
         context.withPropertyValues("ecom.payments.return-url=https://shop.example/orders/{order_id}/paid")
                 .run(started -> {

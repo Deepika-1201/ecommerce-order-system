@@ -21,6 +21,15 @@ public interface PaymentSimulator {
     /** The gateway will create the order's payment, but time out whenever its checkout session is created. */
     void timeOutCheckout(UUID orderId);
 
+    /** The gateway will refuse to cancel the order's payment as an invalid request, as after a change to its API. */
+    void refuseCancel(UUID orderId);
+
+    /**
+     * When the gateway refuses to cancel the order's payment during an attempt, the attempt will fail at once, before
+     * Payments reads the payment ({@code payment.attempt_failed}).
+     */
+    void failAttemptAfterRefusedCancel(UUID orderId);
+
     /** The customer starts paying: until the attempt ends, the payment cannot be cancelled. */
     void startAttempt(UUID orderId);
 

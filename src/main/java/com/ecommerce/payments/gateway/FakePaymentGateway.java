@@ -33,7 +33,9 @@ public class FakePaymentGateway implements PaymentGateway, PaymentSimulator {
         REFUSE,
         TIME_OUT,
         LOSE_ANSWER,
-        TIME_OUT_CHECKOUT
+        TIME_OUT_CHECKOUT,
+        REFUSE_CANCEL,
+        FAIL_ATTEMPT_AFTER_REFUSED_CANCEL
     }
 
     /** What the gateway keeps per idempotency key: the request, to refuse another under the key, and its answer. */
@@ -110,9 +112,17 @@ public class FakePaymentGateway implements PaymentGateway, PaymentSimulator {
             return replay(idempotencyKey, paymentId, GatewayPayment.class);
         }
         FakePayment payment = known(paymentId, idempotencyKey, paymentId);
+        if (scripts.get(payment.orderId) == Script.REFUSE_CANCEL) {
+            throw refuse(idempotencyKey, paymentId, 400, "validation_error", "Refused, as scripted");
+        }
         if (!payment.status.canBeCancelled()) {
-            throw refuse(idempotencyKey, paymentId, 409, "payment_invalid_state",
+            GatewayRefusedException refusal = refuse(idempotencyKey, paymentId, 409, "payment_invalid_state",
                     "The payment is " + wire(payment.status));
+            if (payment.status == GatewayPayment.Status.PROCESSING
+                    && scripts.remove(payment.orderId, Script.FAIL_ATTEMPT_AFTER_REFUSED_CANCEL)) {
+                failAttempt(payment.orderId);
+            }
+            throw refusal;
         }
         payment.moveTo(GatewayPayment.Status.CANCELLED, clock.instant());
         emit("payment.cancelled", payment.json());
@@ -177,6 +187,16 @@ public class FakePaymentGateway implements PaymentGateway, PaymentSimulator {
     @Override
     public synchronized void loseCreationAnswer(UUID orderId) {
         script(orderId, Script.LOSE_ANSWER);
+    }
+
+    @Override
+    public synchronized void refuseCancel(UUID orderId) {
+        script(orderId, Script.REFUSE_CANCEL);
+    }
+
+    @Override
+    public synchronized void failAttemptAfterRefusedCancel(UUID orderId) {
+        script(orderId, Script.FAIL_ATTEMPT_AFTER_REFUSED_CANCEL);
     }
 
     @Override

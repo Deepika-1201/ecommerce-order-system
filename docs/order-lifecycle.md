@@ -61,9 +61,9 @@ stateDiagram-v2
 
 **Reasons.** `REJECTED`: `OUT_OF_STOCK`, `COUPON_UNAVAILABLE`, `PAYMENTS_UNAVAILABLE`. `CANCELLED`: `CUSTOMER`, `SUPPORT`, `PAYMENT_FAILED`, `PAYMENT_EXPIRED`, `STOCK_LOST_AFTER_PAYMENT`.
 
-**Refunds and the order status.** An order becomes `CANCELLED` or `RETURNED_TO_ORIGIN` in the transaction that requests its refund; the outbox guarantees the request is delivered ([LLD §6.4](low-level-design.md#64-orders)). The refund's progress lives on the payment record, and the order shows it; a failed refund raises an alert and a support task ([failure-handling S18](failure-handling.md#s18-a-refund-fails)).
+**Refunds and the order status.** An order becomes `CANCELLED` or `RETURNED_TO_ORIGIN` in the transaction that requests its refund; the outbox guarantees the request is delivered ([LLD §6.4](low-level-design.md#64-orders)). The refund's progress lives on Payments' refund record; the saga copies its milestones onto the order, which shows them ([LLD §7.9](low-level-design.md#79-the-saga)). A failed refund raises an alert and a support task ([failure-handling S18](failure-handling.md#s18-a-refund-fails)).
 
-**What customers see** is the order status plus details composed at read time: payment status, refund status and shipment tracking. The order does not copy those states; it references the records that own them.
+**What customers see** is the order status plus details. The checkout URL and the refund's milestones are copied onto the order from Payments' messages, so the order's reads stay inside Ordering (amended in phase 7, [LLD §7.9](low-level-design.md#79-the-saga)); shipment tracking is composed at read time from the record that owns it.
 
 ## 3. Invalid transitions
 

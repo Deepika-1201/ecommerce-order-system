@@ -95,7 +95,10 @@ final class OrderingApi {
         }
     }
 
-    /** The refund's progress: {@code REQUESTED} when the order asked for it, {@code INITIATED} when Payments did. */
+    /**
+     * The refund's progress: {@code REQUESTED} when the order asked for it, {@code INITIATED} when Payments did, then
+     * {@code SUCCEEDED} or {@code FAILED}.
+     */
     record OrderRefundResponse(long amountPaise, RefundStatus status) {
     }
 

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ecommerce.ordering.OrderingTest;
 import com.ecommerce.payments.PaymentMessages.CancelPayment;
+import com.ecommerce.payments.PaymentMessages.CheckPayment;
 import com.ecommerce.payments.PaymentMessages.CreatePayment;
 import com.ecommerce.payments.PaymentMessages.PaymentCancelRefused;
 import com.ecommerce.payments.PaymentMessages.PaymentCancelled;
@@ -120,6 +121,66 @@ class PaymentTests extends OrderingTest {
     }
 
     @Test
+    void anAttemptThatEndsBetweenARefusedCancelAndTheReadIsLeftToTheSagasDeadline() {
+        payments.failAttemptAfterRefusedCancel(orderId);
+        command(create(orderId, Duration.ofMinutes(15)));
+        payments.startAttempt(orderId);
+
+        command(new CancelPayment(orderId));
+        assertThat(answers()).as("neither refused nor cancelled").containsExactly("payments.payment-created");
+        assertThat(payment(orderId)).isEqualTo("REQUIRES_PAYMENT_METHOD");
+
+        command(new CancelPayment(orderId));
+        assertThat(answers()).containsExactly("payments.payment-created", "payments.payment-cancelled");
+    }
+
+    @Test
+    void aCancelRefusedForAnotherReasonFailsItsTaskAndIsNotAnswered() {
+        payments.refuseCancel(orderId);
+        command(create(orderId, Duration.ofMinutes(15)));
+
+        command(new CancelPayment(orderId));
+
+        assertThat(answers()).containsExactly("payments.payment-created");
+        assertThat(column("SELECT status || ' ' || attempts FROM platform.scheduled_tasks "
+                + "WHERE dedupe_key = 'payments.cancel-payment:' || CAST(:id AS text)"))
+                .as("failed once, to be retried with backoff").isEqualTo("PENDING 1");
+        assertThat(payment(orderId)).isEqualTo("REQUIRES_PAYMENT_METHOD");
+    }
+
+    @Test
+    void aFailedAttemptLeavesThePaymentPayable() {
+        command(create(orderId, Duration.ofMinutes(15)));
+        payments.startAttempt(orderId);
+        payments.failAttempt(orderId);
+        settle();
+        assertThat(payment(orderId)).as("not cancelled: no one asked").isEqualTo("REQUIRES_PAYMENT_METHOD");
+
+        payments.succeed(orderId);
+        settle();
+
+        assertThat(answers()).containsExactly("payments.payment-created", "payments.payment-succeeded");
+    }
+
+    @Test
+    void aCheckAnswersPendingBeforeTheCreationAndTheOutcomeOnceThePaymentEnded() {
+        UUID creating = UUID.randomUUID();
+        payments.timeOutCreation(creating);
+        publish(create(creating, Duration.ofMinutes(15)), "order", creating);
+        publish(new CheckPayment(creating), "order", creating);
+        command(create(orderId, Duration.ofMinutes(15)));
+        payments.succeed(orderId);
+        settle();
+
+        command(new CheckPayment(orderId));
+
+        assertThat(answers(creating)).containsExactly("payments.payment-pending");
+        assertThat(answers()).as("the outcome published when it was entered, and again for the check")
+                .containsExactly("payments.payment-created", "payments.payment-succeeded",
+                        "payments.payment-succeeded");
+    }
+
+    @Test
     void anOlderVersionChangesNothingAndAFinalStatusIsPublishedOnce() {
         command(create(orderId, Duration.ofMinutes(15)));
         String gatewayId = gatewayPaymentId(orderId);
@@ -221,12 +282,17 @@ class PaymentTests extends OrderingTest {
         receive(refundEvent("evt_refund_2", gatewayPaymentId(orderId), "rfnd_overtaking",
                 orderId + ":ORDER_CANCELLED", "succeeded", 3));
         settle();
+        receive(refundEvent("evt_refund_0", gatewayPaymentId(orderId), "rfnd_overtaking",
+                orderId + ":ORDER_CANCELLED", "succeeded", 1));
+        settle();
         command(new RefundPayment(orderId, 123_400, RefundReason.ORDER_CANCELLED));
 
         assertThat(answers()).as("its end published once").containsExactly("payments.payment-created",
                 "payments.payment-succeeded", "payments.refund-succeeded", "payments.refund-initiated");
-        assertThat(column("SELECT gateway_refund_id || ' ' || status FROM payments.refunds WHERE order_id = :id"))
-                .isEqualTo("rfnd_overtaking SUCCEEDED");
+        assertThat(column("""
+                SELECT gateway_refund_id || ' ' || status || ' ' || gateway_version
+                FROM payments.refunds WHERE order_id = :id
+                """)).as("the older report changed nothing").isEqualTo("rfnd_overtaking SUCCEEDED 3");
     }
 
     @Test
@@ -291,11 +357,15 @@ class PaymentTests extends OrderingTest {
 
     /** The types of what Payments published for the order, oldest first. */
     private List<String> answers() {
+        return answers(orderId);
+    }
+
+    private List<String> answers(UUID order) {
         return jdbc.sql("""
                         SELECT type FROM platform.outbox
                         WHERE aggregate_id = :id AND aggregate_type = 'payment' ORDER BY id
                         """)
-                .param("id", orderId.toString())
+                .param("id", order.toString())
                 .query(String.class)
                 .list();
     }

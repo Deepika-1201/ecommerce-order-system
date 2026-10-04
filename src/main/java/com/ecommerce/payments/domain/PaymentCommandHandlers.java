@@ -5,7 +5,6 @@ import com.ecommerce.payments.PaymentMessages.CheckPayment;
 import com.ecommerce.payments.PaymentMessages.CreatePayment;
 import com.ecommerce.payments.PaymentMessages.PaymentCreated;
 import com.ecommerce.payments.PaymentMessages.PaymentCreationFailed;
-import com.ecommerce.payments.PaymentMessages.RefundInitiated;
 import com.ecommerce.payments.PaymentMessages.RefundPayment;
 import com.ecommerce.payments.gateway.GatewayPayment;
 import com.ecommerce.platform.Correlation;
@@ -66,7 +65,7 @@ class PaymentCommandHandlers {
         tasks.schedule(PaymentTasks.check(orderId, message.messageId(), message.correlationId()));
     }
 
-    /** One refund per order and reason, of a successful payment; a refund the gateway has is answered at once. */
+    /** One refund per order and reason, of a successful payment; its task answers, whether or not it is new. */
     @HandlesMessage(consumer = "payments.refund-payment")
     void refundPayment(IncomingMessage<RefundPayment> message) {
         RefundPayment command = message.payload();
@@ -78,14 +77,7 @@ class PaymentCommandHandlers {
         }
         repository.insertRefundIfAbsent(Ids.newId(), orderId, command.reason(), command.amountPaise(),
                 clock.instant());
-        RefundRecord refund = repository.refund(orderId, command.reason()).orElseThrow();
-        if (refund.gatewayRefundId() == null) {
-            tasks.schedule(PaymentTasks.refund(orderId, command.reason(), message.messageId(),
-                    message.correlationId()));
-        } else {
-            updates.publish(new RefundInitiated(orderId, refund.id(), refund.reason(), refund.amountPaise()), payment,
-                    Correlation.causedBy(message));
-        }
+        tasks.schedule(PaymentTasks.refund(orderId, command.reason(), message.messageId(), message.correlationId()));
     }
 
     /** The order's record, locked; a command before {@code CreatePayment} fails its delivery, which is retried. */
