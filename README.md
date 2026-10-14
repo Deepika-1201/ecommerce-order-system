@@ -16,6 +16,11 @@ This is a backend portfolio, not a storefront or production deployment. The loca
 
 ## Portfolio milestone
 
+**The six-item portfolio milestone is complete.** Its final implementation
+[passed CI](https://github.com/Deepika-1201/ecommerce-order-system/actions/runs/38620997376),
+including the reviewer walkthrough and evidence checks. This does not complete
+the larger production roadmap.
+
 The smaller portfolio delivery target is tracked separately in
 [docs/portfolio-milestone.md](docs/portfolio-milestone.md). The full phase roadmap
 is preserved. P1 adds Kafka integration events, catalog availability hints, and

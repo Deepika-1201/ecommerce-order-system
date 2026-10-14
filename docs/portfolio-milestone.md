@@ -5,6 +5,10 @@ the [full implementation plan](implementation-plan.md). That plan and its phase
 statuses remain unchanged. Completing this milestone does not mean completing V1
 or claiming production readiness.
 
+**Completed 2026-10-15:** all six portfolio items passed their local and CI gates.
+Start with [the reviewer guide](portfolio-guide.md) and its recorded rehearsal.
+The larger roadmap's deferred phases remain future work.
+
 ## Goal
 
 Demonstrate an event-driven modular monolith with a correct order saga, stock
@@ -24,8 +28,8 @@ documentation, and CI. They are not elapsed AI-session time or a deadline.
 | P3 | Essential metrics, dashboard, alerts, and runbook | Reduced phase 12 | 10-16 | Done: `55114a9`, CI green |
 | P4 | Essential security hardening and CI checks | Reduced phase 13 | 8-12 | Done: `50f7629`, CI green |
 | P5 | Measured load and stock-contention evidence | Reduced phase 16 | 12-20 | Done: `163b14a`, CI green |
-| P6 | Reproducible demo and portfolio presentation | Selected phase 18 work | 6-10 | Local verification passed; CI pending |
-| Total | Portfolio milestone | | 64-100 | |
+| P6 | Reproducible demo and portfolio presentation | Selected phase 18 work | 6-10 | Done: `a972f7b`, CI green |
+| Total | Portfolio milestone | | 64-100 | Complete |
 
 ### P1: Kafka events and notifications
 
@@ -543,6 +547,7 @@ demonstration, not a narrated video or a recording of browser dashboards.
 
 | Date | Slice | Evidence | Result |
 |---|---|---|---|
+| 2026-10-15 | P6 CI and milestone closeout | Commit `a972f7b`; [GitHub Actions run 38620997376](https://github.com/Deepika-1201/ecommerce-order-system/actions/runs/38620997376) | Full build/security/evidence gates, reviewer walkthrough, load smoke, and real-gateway ecosystem passed; all six portfolio items complete |
 | 2026-10-15 | P6 reviewer path | Corrected README scope, reviewer guide, and `bash scripts/demo-portfolio.sh` against the existing portfolio stack | Passed; original roadmap unchanged |
 | 2026-10-15 | P6 clean clone | Fresh public `163b14a` clone, clean before/after, distinct compose project and new volumes; products/orders/notifications began at 0/0/0 and ended at 2/3/6 | Both existing demos passed; Docker/build caches reused |
 | 2026-10-15 | P6 recording | Actual 41.1-second asciicast, derived transcript, SHA-256 and timestamp checks, 113 local reviewer links, no recognized secret findings | Passed; not a narrated/browser video |
