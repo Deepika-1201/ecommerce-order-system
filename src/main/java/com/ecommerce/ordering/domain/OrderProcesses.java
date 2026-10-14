@@ -24,12 +24,15 @@ class OrderProcesses {
 
     private final OrderRepository orders;
     private final Messages messages;
+    private final OrderEvents events;
     private final OrderingProperties settings;
     private final Clock clock;
 
-    OrderProcesses(OrderRepository orders, Messages messages, OrderingProperties settings, Clock clock) {
+    OrderProcesses(OrderRepository orders, Messages messages, OrderEvents events, OrderingProperties settings,
+            Clock clock) {
         this.orders = orders;
         this.messages = messages;
+        this.events = events;
         this.settings = settings;
         this.clock = clock;
     }
@@ -80,5 +83,6 @@ class OrderProcesses {
     void publish(OrderProcess process, Correlation correlation) {
         Origin origin = new Origin(AGGREGATE, process.orderId(), process.sequence());
         process.commands().forEach(command -> messages.publish(command, origin, correlation));
+        events.publish(process, origin, correlation);
     }
 }

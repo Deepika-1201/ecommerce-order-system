@@ -1,0 +1,11 @@
+[
+  {"type": "order.placed", "data": {"order_id": "01900000-0000-7000-8000-000000000001", "customer_id": "01900000-0000-7000-8000-000000000002", "order_number": "EC000000001", "amount_paise": 59900, "line_count": 1}},
+  {"type": "order.confirmed", "data": {"order_id": "01900000-0000-7000-8000-000000000001", "customer_id": "01900000-0000-7000-8000-000000000002", "payment_id": "01900000-0000-7000-8000-000000000003", "amount_paise": 59900}},
+  {"type": "order.rejected", "data": {"order_id": "01900000-0000-7000-8000-000000000001", "customer_id": "01900000-0000-7000-8000-000000000002", "reason": "OUT_OF_STOCK", "sku": "SKU-ONE"}},
+  {"type": "order.cancelled", "data": {"order_id": "01900000-0000-7000-8000-000000000001", "customer_id": "01900000-0000-7000-8000-000000000002", "reason": "CUSTOMER", "refund_amount_paise": 0}},
+  {"type": "order.shipped", "data": {"order_id": "01900000-0000-7000-8000-000000000001", "customer_id": "01900000-0000-7000-8000-000000000002", "carrier": "SIMULATED", "awb": "SIM-ONE"}},
+  {"type": "order.delivered", "data": {"order_id": "01900000-0000-7000-8000-000000000001", "customer_id": "01900000-0000-7000-8000-000000000002", "delivered_at": "2026-10-14T09:00:00Z"}},
+  {"type": "order.delivery_failed", "data": {"order_id": "01900000-0000-7000-8000-000000000001", "customer_id": "01900000-0000-7000-8000-000000000002"}},
+  {"type": "order.returned_to_origin", "data": {"order_id": "01900000-0000-7000-8000-000000000001", "customer_id": "01900000-0000-7000-8000-000000000002", "refund_amount_paise": 59900, "refund_status": "REQUESTED"}},
+  {"type": "stock.level_changed", "data": {"sku": "SKU-ONE", "location_code": "BLR1", "available": 7}}
+]

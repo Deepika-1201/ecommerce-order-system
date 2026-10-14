@@ -1,8 +1,10 @@
 package com.ecommerce.catalog.web;
 
+import com.ecommerce.catalog.domain.AvailabilityHints;
 import com.ecommerce.catalog.domain.Category;
 import com.ecommerce.catalog.domain.CategoryService;
 import com.ecommerce.catalog.domain.CategoryTree;
+import com.ecommerce.catalog.domain.Product;
 import com.ecommerce.catalog.domain.ProductPage;
 import com.ecommerce.catalog.domain.ProductService;
 import com.ecommerce.catalog.domain.ProductStatus;
@@ -41,11 +43,14 @@ class PublicCatalogController {
     private final CategoryService categories;
     private final ProductService products;
     private final ObjectStorage storage;
+    private final AvailabilityHints availability;
 
-    PublicCatalogController(CategoryService categories, ProductService products, ObjectStorage storage) {
+    PublicCatalogController(CategoryService categories, ProductService products, ObjectStorage storage,
+            AvailabilityHints availability) {
         this.categories = categories;
         this.products = products;
         this.storage = storage;
+        this.availability = availability;
     }
 
     @Operation(summary = "The category tree, sorted by name")
@@ -72,7 +77,9 @@ class PublicCatalogController {
     @Operation(summary = "An active product with its active variants and images")
     @GetMapping("/v1/products/{id}")
     ResponseEntity<PublicProduct> viewProduct(@PathVariable UUID id) {
-        return ResponseEntity.ok().cacheControl(CACHE).body(PublicProduct.of(products.getActive(id), storage));
+        Product product = products.getActive(id);
+        return ResponseEntity.ok().cacheControl(CACHE).body(PublicProduct.of(product, storage,
+                availability.forSkus(product.variants().stream().map(variant -> variant.sku()).toList())));
     }
 
     private static List<CategoryNode> nodes(CategoryTree tree, UUID parentId) {

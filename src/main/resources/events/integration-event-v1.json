@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ecommerce.invalid/events/integration-event-v1.json",
+  "title": "E-commerce integration event version 1",
+  "type": "object",
+  "required": ["message_id", "type", "version", "occurred_at", "source", "aggregate_type", "aggregate_id", "sequence", "correlation_id", "data"],
+  "properties": {
+    "message_id": {"$ref": "#/$defs/uuid"},
+    "type": {"enum": ["order.placed", "order.confirmed", "order.rejected", "order.cancelled", "order.shipped", "order.delivered", "order.delivery_failed", "order.returned_to_origin", "stock.level_changed"]},
+    "version": {"const": 1},
+    "occurred_at": {"type": "string", "format": "date-time"},
+    "source": {"type": "string"},
+    "aggregate_type": {"type": "string"},
+    "aggregate_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "sequence": {"$ref": "#/$defs/nonnegativeLong"},
+    "correlation_id": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "causation_id": {"$ref": "#/$defs/uuid"},
+    "traceparent": {"type": "string", "pattern": "^[0-9a-f]{2}-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$"},
+    "data": {"type": "object"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"type": {"const": "stock.level_changed"}}},
+      "then": {
+        "properties": {
+          "source": {"const": "ecommerce/inventory"},
+          "aggregate_type": {"const": "stock"},
+          "data": {
+            "required": ["sku", "location_code", "available"],
+            "properties": {
+              "sku": {"$ref": "#/$defs/code"},
+              "location_code": {"$ref": "#/$defs/code"},
+              "available": {"$ref": "#/$defs/nonnegativeLong"}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "source": {"const": "ecommerce/ordering"},
+          "aggregate_type": {"const": "order"},
+          "aggregate_id": {"$ref": "#/$defs/uuid"},
+          "data": {"$ref": "#/$defs/orderData"}
+        }
+      }
+    },
+    {
+      "oneOf": [
+        {"properties": {"type": {"const": "order.placed"}, "data": {"required": ["order_number", "amount_paise", "line_count"]}}},
+        {"properties": {"type": {"const": "order.confirmed"}, "data": {"required": ["payment_id", "amount_paise"]}}},
+        {"properties": {"type": {"const": "order.rejected"}, "data": {"required": ["reason"]}}},
+        {"properties": {"type": {"const": "order.cancelled"}, "data": {"required": ["reason", "refund_amount_paise"]}}},
+        {"properties": {"type": {"const": "order.shipped"}, "data": {"required": ["carrier", "awb"]}}},
+        {"properties": {"type": {"const": "order.delivered"}, "data": {"required": ["delivered_at"]}}},
+        {"properties": {"type": {"const": "order.delivery_failed"}}},
+        {"properties": {"type": {"const": "order.returned_to_origin"}, "data": {"required": ["refund_amount_paise", "refund_status"]}}},
+        {"properties": {"type": {"const": "stock.level_changed"}}}
+      ]
+    }
+  ],
+  "$defs": {
+    "uuid": {"type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "code": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "\\S"},
+    "nonnegativeLong": {"type": "integer", "minimum": 0, "maximum": 9223372036854775807},
+    "orderData": {
+      "required": ["order_id", "customer_id"],
+      "properties": {
+        "order_id": {"$ref": "#/$defs/uuid"},
+        "customer_id": {"$ref": "#/$defs/uuid"},
+        "payment_id": {"$ref": "#/$defs/uuid"},
+        "order_number": {"type": "string", "pattern": "^EC[0-9]+$"},
+        "amount_paise": {"$ref": "#/$defs/nonnegativeLong"},
+        "line_count": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+        "reason": {"$ref": "#/$defs/code"},
+        "sku": {"$ref": "#/$defs/code"},
+        "refund_amount_paise": {"$ref": "#/$defs/nonnegativeLong"},
+        "refund_status": {"enum": ["REQUESTED", "INITIATED", "SUCCEEDED", "FAILED"]},
+        "carrier": {"$ref": "#/$defs/code"},
+        "awb": {"$ref": "#/$defs/code"},
+        "delivered_at": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}

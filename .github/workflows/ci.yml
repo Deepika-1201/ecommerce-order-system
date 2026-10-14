@@ -37,9 +37,11 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      COMPOSE_FILE: docker-compose.yml:docker-compose.portfolio.yml
     steps:
       - uses: actions/checkout@v7
-      - name: Start the stack (PostgreSQL, Keycloak, S3Proxy, the app)
+      - name: Start the portfolio stack (PostgreSQL, Keycloak, S3Proxy, Kafka, Mailpit, the app)
         run: docker compose up --build --detach
       - name: Wait for readiness
         run: |
@@ -71,6 +73,8 @@ jobs:
         run: scripts/demo-inventory.sh
       - name: Phase 6 demo (placement with Idempotency-Key, the order process, cancellation, rejection)
         run: scripts/demo-orders.sh
+      - name: Portfolio P1 demo (Kafka stock hints and durable notifications captured by Mailpit)
+        run: bash scripts/demo-events.sh
       - name: Show logs
         if: failure()
         run: docker compose logs

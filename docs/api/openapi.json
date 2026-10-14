@@ -1159,6 +1159,10 @@
       },
       "PublicVariant" : {
         "properties" : {
+          "availability_hint" : {
+            "enum" : [ "UNKNOWN", "IN_STOCK", "SOLD_OUT" ],
+            "type" : "string"
+          },
           "id" : {
             "format" : "uuid",
             "type" : "string"

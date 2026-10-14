@@ -47,6 +47,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-flyway")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-kafka")
+    implementation("org.springframework.boot:spring-boot-starter-mail")
+    implementation("com.networknt:json-schema-validator:$jsonSchemaValidatorVersion")
     implementation("org.springframework.boot:spring-boot-starter-security-oauth2-resource-server")
     implementation("software.amazon.awssdk:s3") {
         exclude(group = "software.amazon.awssdk", module = "apache-client")
@@ -70,8 +72,6 @@ dependencies {
     testImplementation("io.zonky.test.postgres:embedded-postgres-binaries-linux-arm64v8")
     testImplementation("com.tngtech.archunit:archunit-junit5:$archunitVersion")
     testImplementation("net.jqwik:jqwik:$jqwikVersion")
-    // Contract tests validate the gateway adapter's JSON against the gateway's OpenAPI 3.1 document (LLD §7.16).
-    testImplementation("com.networknt:json-schema-validator:$jsonSchemaValidatorVersion")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

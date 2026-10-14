@@ -30,3 +30,5 @@ Format: Context → Problem → Options considered → Decision → Trade-offs �
 | [ADR-024](ADR-024-tracking-newest-reachable-scan.md) | A shipment applies a carrier scan only if it is newer and its status reachable along the state machine | Accepted |
 | [ADR-025](ADR-025-carrier-simulator.md) | The V1 carrier is a simulator in process, behind the carrier port, with its parcels in the database | Accepted |
 | [ADR-026](ADR-026-serviceability-at-placement.md) | Placement checks that the carrier serves the delivery PIN code, from a list kept locally | Accepted |
+| [ADR-027](ADR-027-stock-event-keys.md) | Compacted stock events are keyed by SKU and location, matching their independent versions | Accepted |
+| [ADR-028](ADR-028-durable-email-notifications.md) | Durable deduplicated notification intents; asynchronous, bounded, at-least-once SMTP delivery | Accepted |

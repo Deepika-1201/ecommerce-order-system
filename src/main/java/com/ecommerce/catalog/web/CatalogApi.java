@@ -1,6 +1,7 @@
 package com.ecommerce.catalog.web;
 
 import com.ecommerce.catalog.GstCategory;
+import com.ecommerce.catalog.domain.AvailabilityHints.Hint;
 import com.ecommerce.catalog.domain.Category;
 import com.ecommerce.catalog.domain.ImageStatus;
 import com.ecommerce.catalog.domain.Product;
@@ -153,7 +154,7 @@ final class CatalogApi {
         }
     }
 
-    record PublicVariant(UUID id, String sku, Map<String, String> optionValues, long pricePaise) {
+    record PublicVariant(UUID id, String sku, Map<String, String> optionValues, long pricePaise, Hint availabilityHint) {
     }
 
     record PublicImage(UUID id, URI url, String altText) {
@@ -170,13 +171,13 @@ final class CatalogApi {
             List<PublicVariant> variants,
             List<PublicImage> images) {
 
-        static PublicProduct of(Product product, ObjectStorage storage) {
+        static PublicProduct of(Product product, ObjectStorage storage, Map<String, Hint> availability) {
             return new PublicProduct(product.id(), product.title(), product.description(),
                     CategoryRef.of(product.category()), OptionBody.of(product.options()), CURRENCY,
                     product.variants().stream()
                             .filter(variant -> variant.status() == VariantStatus.ACTIVE)
                             .map(variant -> new PublicVariant(variant.id(), variant.sku(), variant.optionValues(),
-                                    variant.pricePaise()))
+                                    variant.pricePaise(), availability.getOrDefault(variant.sku(), Hint.UNKNOWN)))
                             .toList(),
                     product.images().stream()
                             .filter(image -> image.status() == ImageStatus.READY)

@@ -103,12 +103,15 @@ class PlacementTests extends OrderingTest {
     void theDeliveryAddressMustBeTheCustomersAndInTheQuotesState() {
         String sku = product("Steel bottle", 59_900, 5);
         UUID quoteId = quote(asha, KARNATAKA, null, sku, 1);
+        int existingEvents = jdbc.sql("SELECT count(*) FROM platform.outbox").query(Integer.class).single();
 
         assertCode(place(asha, quoteId, address(ravi, KARNATAKA), newKey()), 422, "address_not_found");
         assertCode(place(asha, quoteId, UUID.randomUUID().toString(), newKey()), 422, "address_not_found");
         assertCode(place(asha, quoteId, address(asha, MAHARASHTRA), newKey()), 422, "address_state_mismatch");
         assertThat(jdbc.sql("SELECT count(*) FROM ordering.orders").query(Integer.class).single()).isZero();
-        assertThat(jdbc.sql("SELECT count(*) FROM platform.outbox").query(Integer.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM platform.outbox").query(Integer.class).single())
+                .as("rejected placement adds no effects beyond the stock receipt used by the fixture")
+                .isEqualTo(existingEvents);
     }
 
     @Test

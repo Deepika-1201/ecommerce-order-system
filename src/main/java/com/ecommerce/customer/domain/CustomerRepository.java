@@ -59,6 +59,11 @@ class CustomerRepository {
                 .optional();
     }
 
+    Optional<String> email(UUID customerId) {
+        return jdbc.sql("SELECT email FROM customer.customers WHERE id = :id AND email IS NOT NULL")
+                .param("id", customerId).query(String.class).optional().filter(value -> !value.isBlank());
+    }
+
     void updateProfile(UUID id, String email, String name, String phone) {
         jdbc.sql("""
                         UPDATE customer.customers

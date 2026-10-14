@@ -75,6 +75,7 @@ final class OrderProcess {
     private final OrderFacts order;
     private final OrderingProperties settings;
     private final long version;
+    private final OrderStatus initialStatus;
     private OrderStatus status;
     private OrderReason reason;
     private String shortSku;
@@ -99,6 +100,7 @@ final class OrderProcess {
         this.order = order;
         this.settings = settings;
         this.version = state.version();
+        this.initialStatus = state.status();
         this.status = state.status();
         this.reason = state.reason();
         this.shortSku = state.shortSku();
@@ -598,6 +600,10 @@ final class OrderProcess {
 
     OrderStatus status() {
         return status;
+    }
+
+    OrderStatus initialStatus() {
+        return initialStatus;
     }
 
     Step step() {

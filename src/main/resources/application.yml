@@ -15,6 +15,14 @@ spring:
   jackson:
     property-naming-strategy: SNAKE_CASE
     default-property-inclusion: non_null
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:1025}
+    properties:
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+      mail.smtp.starttls.required: ${SMTP_STARTTLS_REQUIRED:false}
   # Tokens are validated against ecom.security (LLD §3.2); keys are fetched from the JWK set, never by discovery.
   security:
     oauth2:
@@ -40,6 +48,11 @@ server:
 
 ecom:
   roles: ${ECOM_ROLES:api,worker}
+  events:
+    enabled: ${ECOM_EVENTS_ENABLED:false}
+    partitions: ${ECOM_EVENTS_PARTITIONS:12}
+    replication-factor: ${ECOM_EVENTS_REPLICATION_FACTOR:1}
+    min-in-sync-replicas: ${ECOM_EVENTS_MIN_IN_SYNC_REPLICAS:1}
   security:
     issuer: ${ECOM_SECURITY_ISSUER:http://localhost:8180/realms/ecommerce}
     jwk-set-uri: ${ECOM_SECURITY_JWK_SET_URI:http://localhost:8180/realms/ecommerce/protocol/openid-connect/certs}

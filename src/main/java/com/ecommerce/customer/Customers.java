@@ -10,6 +10,9 @@ public interface Customers {
     /** The caller's customer id; the first call creates the profile (LLD §3.4). */
     UUID idOf(Caller caller);
 
+    /** The identity-provider email for an internal notification; not exposed through another customer's API. */
+    Optional<String> email(UUID customerId);
+
     /**
      * Copies one of the customer's addresses into a new snapshot that never changes (ADR-023), in the caller's
      * transaction; empty if the customer has no such address.

@@ -12,6 +12,23 @@ It is one of four independent systems that integrate only through published cont
 
 > **Status:** Phases 1 (scaffolding), 2 (platform: transactional outbox, dispatcher, Kafka relay, task scheduler, idempotency keys, audit log), 3 (catalog and customers: OIDC resource server, catalog with search and pre-signed image uploads, customer profiles and addresses, OpenAPI document), 4 (cart and pricing: guest and customer carts with merge at sign-in, quotes with GST and shipping, coupons with redemption limits), 5 (inventory: reservations that never oversell, hold expiry with on-demand reclaim, warehouse receipts and adjustments with a movement ledger), 6 (ordering: orders placed from a quote with an Idempotency-Key, the order saga across Inventory, Pricing and, as simulators until phases 7 and 8, Payments and Fulfillment, with compensation, late and duplicate replies, cancellation by customers and support, and deadlines), 7 (payments: the gateway adapter with contract tests against its OpenAPI document, hosted checkout, signed webhooks into an inbox, status polls, refunds and late successes, end to end against the real Payment Gateway) and 8 (fulfillment: shipments booked through a carrier port within a 24-hour budget, the warehouse's packed and handed-over marks, signed tracking webhooks applied only if newer and reachable so tracking never moves backwards, return to origin restocked and refunded, against a carrier simulator with PIN-code scenarios) are done. Phase 9 (events and notifications: integration events on Kafka, event schemas with compatibility tests, the notifications consumer with a dead-letter topic, Mailpit) is next. The design (requirements, HLD, saga, consistency and failure analysis, ADR-001 to ADR-014) was approved on 2026-10-02.
 
+## Portfolio milestone
+
+The smaller portfolio delivery target is tracked separately in
+[docs/portfolio-milestone.md](docs/portfolio-milestone.md). The full phase roadmap
+is preserved. P1 adds Kafka integration events, catalog availability hints, and
+durable email notifications captured locally by Mailpit:
+
+```bash
+export COMPOSE_FILE=docker-compose.yml:docker-compose.portfolio.yml
+docker compose up --build --detach --wait --wait-timeout 240
+bash scripts/demo-events.sh
+```
+
+Mailpit: <http://localhost:8025>. The demo does not send email to real recipients.
+The milestone document records verification evidence, delivery limitations, and
+the remaining portfolio work.
+
 ## Quick start
 
 JDK 25 is required; Docker is optional.

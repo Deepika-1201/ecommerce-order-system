@@ -1,5 +1,9 @@
 package com.ecommerce.inventory.domain;
 
+import com.ecommerce.inventory.StockLevelChanged;
+import com.ecommerce.platform.Correlation;
+import com.ecommerce.platform.Messages;
+import com.ecommerce.platform.Origin;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Instant;
@@ -10,6 +14,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * SQL for stock items and their movements. The counters change only by conditional updates, never read-modify-write;
@@ -24,14 +29,18 @@ class StockRepository {
             """;
 
     private final JdbcClient jdbc;
+    private final Messages messages;
+    private final JsonMapper json;
 
-    StockRepository(JdbcClient jdbc) {
+    StockRepository(JdbcClient jdbc, Messages messages, JsonMapper json) {
         this.jdbc = jdbc;
+        this.messages = messages;
+        this.json = json;
     }
 
     /** Takes the units into {@code reserved} if that many are available; false if not, or without a stock item. */
     boolean take(ReservedLine line, Instant now) {
-        return jdbc.sql("""
+        boolean taken = jdbc.sql("""
                         UPDATE inventory.stock_items
                         SET reserved = reserved + :quantity, version = version + 1, updated_at = :now
                         WHERE sku = :sku AND location_code = :location AND on_hand - reserved >= :quantity
@@ -41,6 +50,10 @@ class StockRepository {
                 .param("sku", line.sku())
                 .param("location", line.locationCode())
                 .update() == 1;
+        if (taken) {
+            publish(find(line.sku(), line.locationCode()).orElseThrow());
+        }
+        return taken;
     }
 
     /** Units available now, without waiting for a lock; 0 without a stock item. */
@@ -50,22 +63,24 @@ class StockRepository {
 
     /** Gives held or committed units back to {@code available}. */
     void giveBack(ReservedLine line, Instant now) {
-        changeExactlyOne("reserved = reserved - :quantity", line, now);
+        publish(changeExactlyOne("reserved = reserved - :quantity", line, now));
     }
 
     /** Committed units leave the warehouse; returns {@code on_hand} after. */
     long handOver(ReservedLine line, Instant now) {
-        return changeExactlyOne("on_hand = on_hand - :quantity, reserved = reserved - :quantity", line, now);
+        return changeExactlyOne("on_hand = on_hand - :quantity, reserved = reserved - :quantity", line, now).onHand();
     }
 
     /** Returned units are back on hand; returns {@code on_hand} after. */
     long restock(ReservedLine line, Instant now) {
-        return changeExactlyOne("on_hand = on_hand + :quantity", line, now);
+        StockLevel level = changeExactlyOne("on_hand = on_hand + :quantity", line, now);
+        publish(level);
+        return level.onHand();
     }
 
     /** Adds received units, creating the stock item on the first receipt. */
     StockLevel receive(String sku, String location, int quantity, Instant now) {
-        return jdbc.sql("""
+        StockLevel level = jdbc.sql("""
                         INSERT INTO inventory.stock_items AS s
                             (sku, location_code, on_hand, reserved, version, created_at, updated_at)
                         VALUES (:sku, :location, :quantity, 0, 1, :now, :now)
@@ -80,11 +95,13 @@ class StockRepository {
                 .param("now", utc(now))
                 .query(StockRepository::level)
                 .single();
+            publish(level);
+            return level;
     }
 
     /** Changes {@code on_hand} unless it would drop below {@code reserved}; empty if it would, or without an item. */
     Optional<StockLevel> adjust(String sku, String location, int quantityChange, Instant now) {
-        return jdbc.sql("""
+        Optional<StockLevel> changed = jdbc.sql("""
                         UPDATE inventory.stock_items
                         SET on_hand = on_hand + :change, version = version + 1, updated_at = :now
                         WHERE sku = :sku AND location_code = :location AND on_hand + :change >= reserved
@@ -96,6 +113,8 @@ class StockRepository {
                 .param("location", location)
                 .query(StockRepository::level)
                 .optional();
+            changed.ifPresent(this::publish);
+            return changed;
     }
 
     Optional<StockLevel> find(String sku, String location) {
@@ -156,15 +175,21 @@ class StockRepository {
         return statement.query(StockRepository::movement).list();
     }
 
-    private long changeExactlyOne(String change, ReservedLine line, Instant now) {
+    private StockLevel changeExactlyOne(String change, ReservedLine line, Instant now) {
         return jdbc.sql("UPDATE inventory.stock_items SET " + change + ", version = version + 1, updated_at = :now"
-                        + " WHERE sku = :sku AND location_code = :location RETURNING on_hand")
+                        + " WHERE sku = :sku AND location_code = :location RETURNING " + LEVEL_COLUMNS)
                 .param("quantity", line.quantity())
                 .param("now", utc(now))
                 .param("sku", line.sku())
                 .param("location", line.locationCode())
-                .query(Long.class)
+                .query(StockRepository::level)
                 .single();
+    }
+
+    private void publish(StockLevel level) {
+        String key = json.writeValueAsString(List.of(level.sku(), level.locationCode()));
+        messages.publish(new StockLevelChanged(level.sku(), level.locationCode(), level.available()),
+                new Origin("stock", key, level.version()), Correlation.start(key));
     }
 
     private static StockLevel level(ResultSet row, int rowNumber) throws SQLException {

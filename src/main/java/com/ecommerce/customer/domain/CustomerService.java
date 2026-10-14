@@ -35,6 +35,12 @@ public class CustomerService implements Customers {
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public Optional<String> email(UUID customerId) {
+        return customers.email(customerId);
+    }
+
+    @Override
     @Transactional
     public Optional<AddressSnapshot> snapshotAddress(UUID customerId, UUID addressId) {
         return customers.insertSnapshot(Ids.newId(), customerId, addressId);
