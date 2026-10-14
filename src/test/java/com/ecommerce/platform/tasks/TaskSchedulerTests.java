@@ -9,6 +9,7 @@ import com.ecommerce.platform.tasks.TaskFixtures.RecordTask;
 import com.ecommerce.platform.tasks.TaskFixtures.RecordingTasks;
 import com.ecommerce.support.IntegrationTest;
 import com.ecommerce.support.PlatformTables;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -58,6 +59,9 @@ class TaskSchedulerTests extends IntegrationTest {
 
     @Autowired
     private JdbcClient jdbc;
+
+    @Autowired
+    private MeterRegistry metrics;
 
     @BeforeEach
     void reset() {
@@ -279,6 +283,32 @@ class TaskSchedulerTests extends IntegrationTest {
                 .isEqualTo(1);
         assertThat(count("SELECT count(*) FROM platform.scheduled_tasks WHERE type = 'platform.cleanup'"))
                 .isEqualTo(1);
+    }
+
+    @Test
+    void gaugesDistinguishFutureWorkFromOverdueWorkAndExpiredLeases() {
+        schedule(record("due"));
+        schedule(record("future").runAt(Instant.now().plus(Duration.ofHours(1))));
+        jdbc.sql("""
+                UPDATE platform.scheduled_tasks SET run_at = now() - interval '2 minutes'
+                WHERE dedupe_key = 'due'
+                """).update();
+
+        assertThat(metrics.get("ecom.tasks.current").tag("status", "PENDING").gauge().value()).isEqualTo(2);
+        assertThat(metrics.get("ecom.tasks.oldest.due.age").gauge().value()).isBetween(120.0, 150.0);
+        assertThat(repository.claimNext(RECORD_TYPE, Duration.ofHours(1))).isPresent();
+        assertThat(metrics.get("ecom.tasks.current").tag("status", "RUNNING").gauge().value()).isEqualTo(1);
+        assertThat(metrics.get("ecom.tasks.oldest.due.age").gauge().value()).isZero();
+        assertThat(metrics.get("ecom.tasks.expired.leases").gauge().value()).isZero();
+
+        expireLeases();
+        assertThat(metrics.get("ecom.tasks.expired.leases").gauge().value()).isEqualTo(1);
+        runAllDue();
+
+        assertThat(metrics.get("ecom.tasks.expired.leases").gauge().value()).isZero();
+        assertThat(metrics.get("ecom.tasks.current").tag("status", "PENDING").gauge().value()).isEqualTo(1);
+        assertThat(metrics.get("ecom.tasks.current").tag("status", "SUCCEEDED").gauge().value()).isEqualTo(1);
+        assertThat(metrics.get("ecom.tasks.oldest.due.age").gauge().value()).isZero();
     }
 
     private static TaskRequest record(String label) {

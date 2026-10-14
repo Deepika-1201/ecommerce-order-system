@@ -1,5 +1,6 @@
 package com.ecommerce.platform.tasks;
 
+import com.ecommerce.platform.FlowContext;
 import com.ecommerce.platform.TaskExecution;
 import com.ecommerce.platform.WorkerComponent;
 import com.ecommerce.platform.tasks.TaskHandlerRegistry.RegisteredTask;
@@ -10,7 +11,6 @@ import com.ecommerce.platform.workers.WorkerProperties;
 import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.core.NestedExceptionUtils;
 import tools.jackson.core.JacksonException;
@@ -71,15 +71,8 @@ class TaskRunner implements SmartLifecycle {
         if (task == null) {
             return false;
         }
-        if (task.correlationId() != null) {
-            MDC.put("correlation_id", task.correlationId());
-        }
-        MDC.put("task_id", task.id().toString());
-        try {
+        try (var _ = FlowContext.task(task.correlationId(), task.id())) {
             run(task, registry.handlerFor(task.type()));
-        } finally {
-            MDC.remove("correlation_id");
-            MDC.remove("task_id");
         }
         return true;
     }
@@ -108,6 +101,8 @@ class TaskRunner implements SmartLifecycle {
         if (!recorded) {
             log.warn("Task {} ({}) finished attempt {} after losing its lease; another worker owns it now",
                     task.id(), task.type(), task.attempt());
+        } else if (!task.recurring()) {
+            log.info("task_completed type={} attempt={}", task.type(), task.attempt());
         }
     }
 

@@ -67,10 +67,18 @@ ecom:
 management:
   server:
     port: ${MANAGEMENT_PORT:8081}
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      minimum-expected-value:
+        http.server.requests: 1ms
+      maximum-expected-value:
+        http.server.requests: 5s
   endpoints:
     web:
       exposure:
-        include: health,info,openapi
+        include: health,info,openapi,prometheus
   endpoint:
     health:
       probes:
@@ -81,7 +89,7 @@ management:
 
 logging:
   pattern:
-    level: "%5p [%X{request_id:-}]"
+    level: "%5p [request_id=%X{request_id:-} correlation_id=%X{correlation_id:-} message_id=%X{message_id:-} task_id=%X{task_id:-}]"
 
 # The OpenAPI document, on the management port only (ADR-016); the committed copy is docs/api/openapi.json.
 springdoc:

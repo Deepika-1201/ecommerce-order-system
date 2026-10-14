@@ -29,6 +29,21 @@ Mailpit: <http://localhost:8025>. The demo does not send email to real recipient
 The milestone document records verification evidence, delivery limitations, and
 the remaining portfolio work.
 
+P2's selected failure evidence runs with `./gradlew portfolioFailureTest`.
+P3 adds optional metrics, tested alerts, and a read-only operational dashboard:
+
+```bash
+export COMPOSE_FILE=docker-compose.yml:docker-compose.portfolio.yml:docker-compose.observability.yml
+docker compose up --build --detach --wait --wait-timeout 240
+bash scripts/demo-observability.sh
+```
+
+Grafana: <http://localhost:3001/d/ecommerce-operations>. Prometheus:
+<http://localhost:9090/alerts>. See [docs/portfolio-runbook.md](docs/portfolio-runbook.md)
+for diagnosis and recovery. The overlay requires Docker Compose 2.24.4+ and
+restricts the management port to localhost. These are local portfolio tools,
+not a production paging or cross-service tracing deployment.
+
 ## Quick start
 
 JDK 25 is required; Docker is optional.

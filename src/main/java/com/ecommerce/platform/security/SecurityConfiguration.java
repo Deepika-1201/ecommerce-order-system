@@ -56,7 +56,7 @@ class SecurityConfiguration {
                     rules.requestMatchers(EndpointRequest.to(HealthEndpoint.class, InfoEndpoint.class)).permitAll();
                     rules.requestMatchers(EndpointRequest.toAdditionalPaths(WebServerNamespace.SERVER,
                             HealthEndpoint.class)).permitAll();
-                    rules.requestMatchers(EndpointRequest.to("openapi")).permitAll();
+                    rules.requestMatchers(EndpointRequest.to("openapi", "prometheus")).permitAll();
                     moduleRules.forEach(module -> module.configure(rules));
                     rules.anyRequest().denyAll();
                 });

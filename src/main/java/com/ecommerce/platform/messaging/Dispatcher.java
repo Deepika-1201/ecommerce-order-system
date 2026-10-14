@@ -1,5 +1,6 @@
 package com.ecommerce.platform.messaging;
 
+import com.ecommerce.platform.FlowContext;
 import com.ecommerce.platform.IncomingMessage;
 import com.ecommerce.platform.WorkerComponent;
 import com.ecommerce.platform.messaging.MessageHandlerRegistry.RegisteredHandler;
@@ -12,7 +13,6 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.core.NestedExceptionUtils;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -107,8 +107,7 @@ class Dispatcher implements SmartLifecycle {
             log.debug("Message {} was already processed by {}", pending.messageId(), handler.consumer());
             return;
         }
-        try (var _ = MDC.putCloseable("correlation_id", message.correlationId());
-                var _ = MDC.putCloseable("message_id", message.messageId().toString())) {
+        try (var _ = FlowContext.message(message.correlationId(), message.messageId())) {
             handler.invoke(message);
         }
     }

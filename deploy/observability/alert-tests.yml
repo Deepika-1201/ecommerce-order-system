@@ -1,0 +1,249 @@
+rule_files:
+  - alerts.yml
+evaluation_interval: 15s
+group_eval_order:
+  - ecommerce-portfolio
+
+tests:
+  - name: Healthy queues and exact age thresholds do not alert
+    interval: 15s
+    input_series:
+      - series: 'up{job="ecommerce",instance="app:8081"}'
+        values: '1+0x40'
+      - series: 'ecom_outbox_pending{job="ecommerce",channel="kafka"}'
+        values: '0+0x40'
+      - series: 'ecom_outbox_oldest_age_seconds{job="ecommerce",channel="kafka"}'
+        values: '120+0x40'
+      - series: 'ecom_outbox_parked{job="ecommerce",channel="internal"}'
+        values: '0+0x40'
+      - series: 'ecom_orders_oldest_overdue_age_seconds{job="ecommerce"}'
+        values: '300+0x40'
+      - series: 'ecom_tasks_oldest_due_age_seconds{job="ecommerce"}'
+        values: '120+0x40'
+      - series: 'ecom_tasks_expired_leases{job="ecommerce"}'
+        values: '0+0x40'
+      - series: 'ecom_tasks_current{job="ecommerce",status="DEAD"}'
+        values: '0+0x40'
+      - series: 'ecom_notifications_oldest_pending_age_seconds{job="ecommerce"}'
+        values: '300+0x40'
+      - series: 'ecom_notifications_current{job="ecommerce",status="FAILED"}'
+        values: '0+0x40'
+      - series: 'ecom_kafka_deadletters_published_total{job="ecommerce",consumer="ecom-notifications"}'
+        values: '0+0x40'
+      - series: 'ecom_kafka_deadletters_failures_total{job="ecommerce",consumer="ecom-notifications"}'
+        values: '0+0x40'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: EcommerceScrapeUnavailable
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: EcommerceMetricsInvalid
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: EcommerceOutboxStalled
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: EcommerceOutboxParked
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: EcommerceOrdersOverdue
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: EcommerceTasksNeedAttention
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: EcommerceNotificationsNeedAttention
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: EcommerceKafkaRecoveryActivity
+        exp_alerts: []
+
+  - name: Sustained faults wait for their configured hold periods
+    interval: 15s
+    input_series:
+      - series: 'up{job="ecommerce",instance="app:8081"}'
+        values: '0+0x20'
+      - series: 'ecom_outbox_pending{job="ecommerce",channel="kafka"}'
+        values: '2+0x20'
+      - series: 'ecom_outbox_oldest_age_seconds{job="ecommerce",channel="kafka"}'
+        values: '121+0x20'
+      - series: 'ecom_outbox_parked{job="ecommerce",channel="internal"}'
+        values: '1+0x20'
+      - series: 'ecom_orders_oldest_overdue_age_seconds{job="ecommerce"}'
+        values: '301+0x20'
+      - series: 'ecom_tasks_oldest_due_age_seconds{job="ecommerce"}'
+        values: '121+0x20'
+      - series: 'ecom_notifications_oldest_pending_age_seconds{job="ecommerce"}'
+        values: '301+0x20'
+    alert_rule_test:
+      - eval_time: 45s
+        alertname: EcommerceScrapeUnavailable
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: EcommerceScrapeUnavailable
+        exp_alerts:
+          - exp_labels: {job: ecommerce, severity: critical}
+            exp_annotations:
+              summary: E-commerce metrics cannot be scraped
+              runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#scrape-unavailable
+      - eval_time: 1m45s
+        alertname: EcommerceOutboxStalled
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: EcommerceOutboxStalled
+        exp_alerts:
+          - exp_labels: {job: ecommerce, channel: kafka, severity: warning}
+            exp_annotations:
+              summary: Outbox delivery is falling behind
+              runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#outbox-backlog
+      - eval_time: 15s
+        alertname: EcommerceOutboxParked
+        exp_alerts: []
+      - eval_time: 30s
+        alertname: EcommerceOutboxParked
+        exp_alerts:
+          - exp_labels: {job: ecommerce, channel: internal, severity: warning}
+            exp_annotations:
+              summary: An outbox message needs operator redrive
+              runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#outbox-backlog
+      - eval_time: 1m45s
+        alertname: EcommerceOrdersOverdue
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: EcommerceOrdersOverdue
+        exp_alerts:
+          - exp_labels: {job: ecommerce, severity: warning}
+            exp_annotations:
+              summary: An order process remains past its deadline
+              runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#order-flow
+      - eval_time: 45s
+        alertname: EcommerceTasksNeedAttention
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: EcommerceTasksNeedAttention
+        exp_alerts:
+          - &tasks-alert
+            exp_labels: {job: ecommerce, severity: warning}
+            exp_annotations:
+              summary: Scheduled work needs attention
+              runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#scheduled-tasks
+      - eval_time: 45s
+        alertname: EcommerceNotificationsNeedAttention
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: EcommerceNotificationsNeedAttention
+        exp_alerts:
+          - &notifications-alert
+            exp_labels: {job: ecommerce, severity: warning}
+            exp_annotations:
+              summary: Email delivery needs attention
+              runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#notifications
+
+  - name: An expired lease alerts without a pending backlog
+    interval: 15s
+    input_series:
+      - series: 'ecom_tasks_oldest_due_age_seconds{job="ecommerce"}'
+        values: '0+0x8'
+      - series: 'ecom_tasks_expired_leases{job="ecommerce"}'
+        values: '1+0x8'
+      - series: 'ecom_tasks_current{job="ecommerce",status="DEAD"}'
+        values: '0+0x8'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: EcommerceTasksNeedAttention
+        exp_alerts: [*tasks-alert]
+
+  - name: A dead task alerts without an expired lease
+    interval: 15s
+    input_series:
+      - series: 'ecom_tasks_oldest_due_age_seconds{job="ecommerce"}'
+        values: '0+0x8'
+      - series: 'ecom_tasks_expired_leases{job="ecommerce"}'
+        values: '0+0x8'
+      - series: 'ecom_tasks_current{job="ecommerce",status="DEAD"}'
+        values: '1+0x8'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: EcommerceTasksNeedAttention
+        exp_alerts: [*tasks-alert]
+
+  - name: A failed notification alerts without pending mail
+    interval: 15s
+    input_series:
+      - series: 'ecom_notifications_oldest_pending_age_seconds{job="ecommerce"}'
+        values: '0+0x8'
+      - series: 'ecom_notifications_current{job="ecommerce",status="FAILED"}'
+        values: '1+0x8'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: EcommerceNotificationsNeedAttention
+        exp_alerts: [*notifications-alert]
+
+  - name: Counter activity fires on the first increment and resolves after the window
+    interval: 15s
+    input_series:
+      - series: 'ecom_kafka_deadletters_published_total{job="ecommerce",consumer="ecom-notifications"}'
+        values: '0 0 1+0x38'
+      - series: 'ecom_kafka_deadletters_failures_total{job="ecommerce",consumer="ecom-catalog-availability"}'
+        values: '0 0 1+0x38'
+    alert_rule_test:
+      - eval_time: 15s
+        alertname: EcommerceKafkaRecoveryActivity
+        exp_alerts: []
+      - eval_time: 30s
+        alertname: EcommerceKafkaRecoveryActivity
+        exp_alerts:
+          - exp_labels: {job: ecommerce, consumer: ecom-notifications, severity: warning}
+            exp_annotations:
+              summary: Kafka consumer recovery needs inspection
+              runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#kafka-recovery
+          - exp_labels: {job: ecommerce, consumer: ecom-catalog-availability, severity: warning}
+            exp_annotations:
+              summary: Kafka consumer recovery needs inspection
+              runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#kafka-recovery
+      - eval_time: 6m
+        alertname: EcommerceKafkaRecoveryActivity
+        exp_alerts: []
+
+  - name: NaN is an invalid measurement not an empty queue
+    interval: 15s
+    input_series:
+      - series: 'ecom_outbox_pending{job="ecommerce",channel="kafka"}'
+        values: 'NaN NaN NaN NaN NaN NaN 0+0x8'
+    alert_rule_test:
+      - eval_time: 45s
+        alertname: EcommerceMetricsInvalid
+        exp_alerts: []
+      - eval_time: 1m
+        alertname: EcommerceMetricsInvalid
+        exp_alerts:
+          - &metrics-alert
+            exp_labels: {job: ecommerce, severity: warning}
+            exp_annotations:
+              summary: Database-backed metrics are missing or invalid
+              runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#scrape-unavailable
+      - eval_time: 2m
+        alertname: EcommerceMetricsInvalid
+        exp_alerts: []
+
+  - name: A healthy HTTP scrape without application gauges is still invalid
+    interval: 15s
+    input_series:
+      - series: 'up{job="ecommerce"}'
+        values: '1+0x8'
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: EcommerceMetricsInvalid
+        exp_alerts: [*metrics-alert]
+
+  - name: An absent target is not healthy
+    interval: 15s
+    input_series: []
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: EcommerceScrapeUnavailable
+        exp_alerts:
+          - exp_labels: {job: ecommerce, severity: critical}
+            exp_annotations:
+              summary: E-commerce metrics cannot be scraped
+              runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#scrape-unavailable

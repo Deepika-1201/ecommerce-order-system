@@ -1,0 +1,76 @@
+groups:
+  - name: ecommerce-portfolio
+    interval: 15s
+    rules:
+      - alert: EcommerceScrapeUnavailable
+        expr: max by (job) (up{job="ecommerce"}) == 0 or absent(up{job="ecommerce"})
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: E-commerce metrics cannot be scraped
+          runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#scrape-unavailable
+      - alert: EcommerceMetricsInvalid
+        expr: >-
+          max by (job) (ecom_outbox_pending{job="ecommerce"} != bool ecom_outbox_pending{job="ecommerce"}) > 0
+          or max by (job) (absent(ecom_outbox_pending{job="ecommerce",channel="kafka"}))
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Database-backed metrics are missing or invalid
+          runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#scrape-unavailable
+      - alert: EcommerceOutboxStalled
+        expr: max by (job, channel) (ecom_outbox_oldest_age_seconds{job="ecommerce"}) > 120
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Outbox delivery is falling behind
+          runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#outbox-backlog
+      - alert: EcommerceOutboxParked
+        expr: max by (job, channel) (ecom_outbox_parked{job="ecommerce"}) > 0
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: An outbox message needs operator redrive
+          runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#outbox-backlog
+      - alert: EcommerceOrdersOverdue
+        expr: max by (job) (ecom_orders_oldest_overdue_age_seconds{job="ecommerce"}) > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: An order process remains past its deadline
+          runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#order-flow
+      - alert: EcommerceTasksNeedAttention
+        expr: >-
+          max by (job) (ecom_tasks_oldest_due_age_seconds{job="ecommerce"}) > 120
+          or max by (job) (ecom_tasks_expired_leases{job="ecommerce"}) > 0
+          or max by (job) (ecom_tasks_current{job="ecommerce",status="DEAD"}) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Scheduled work needs attention
+          runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#scheduled-tasks
+      - alert: EcommerceNotificationsNeedAttention
+        expr: >-
+          max by (job) (ecom_notifications_oldest_pending_age_seconds{job="ecommerce"}) > 300
+          or max by (job) (ecom_notifications_current{job="ecommerce",status="FAILED"}) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Email delivery needs attention
+          runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#notifications
+      - alert: EcommerceKafkaRecoveryActivity
+        expr: >-
+          sum by (job, consumer) (increase(ecom_kafka_deadletters_published_total{job="ecommerce"}[5m])) > 0
+          or sum by (job, consumer) (increase(ecom_kafka_deadletters_failures_total{job="ecommerce"}[5m])) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Kafka consumer recovery needs inspection
+          runbook_url: https://github.com/Deepika-1201/ecommerce-order-system/blob/main/docs/portfolio-runbook.md#kafka-recovery

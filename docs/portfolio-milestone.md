@@ -20,8 +20,8 @@ documentation, and CI. They are not elapsed AI-session time or a deadline.
 | ID | Work | Full-plan reference | Estimated hours | Status |
 |---|---|---|---|---|
 | P1 | Kafka integration events and notifications | Phase 9 | 18-26 | Done: `872d073`, CI green |
-| P2 | Focused failure and recovery demonstrations | Selected phase 11 work | 10-16 | Local verification passed; CI pending |
-| P3 | Essential metrics, dashboard, alerts, and runbook | Reduced phase 12 | 10-16 | Not started |
+| P2 | Focused failure and recovery demonstrations | Selected phase 11 work | 10-16 | Done: `272155e`, CI green |
+| P3 | Essential metrics, dashboard, alerts, and runbook | Reduced phase 12 | 10-16 | Local verification passed; CI pending |
 | P4 | Essential security hardening and CI checks | Reduced phase 13 | 8-12 | Not started |
 | P5 | Measured load and stock-contention evidence | Reduced phase 16 | 12-20 | Not started |
 | P6 | Reproducible demo and portfolio presentation | Selected phase 18 work | 6-10 | Not started |
@@ -327,6 +327,70 @@ not a certification that every operational form of S1-S20 has been tested.
 - Live database outages, real scheduler recovery, flash-sale overload, and cloud
   disaster recovery remain outside this portfolio subset of the full plan.
 
+## P3 implementation design
+
+Start with database-backed queue gauges owned by the module that owns each table.
+Outbox pending counts include parked rows, which can block later messages for the
+same aggregate; parked is a subset, not an additional backlog to sum. Age uses
+PostgreSQL's `now()` and the oldest undelivered row, with zero for an empty queue.
+Only fixed transport/status labels are allowed. Order IDs, customer IDs, message
+IDs, payloads, and exception text never become metric labels.
+
+Prometheus is exposed on the existing internal management port, never the public
+application port. The local observability stack will scrape that endpoint; a
+deployment must restrict the management network. Queue metrics describe current
+database state rather than cumulative delivery counters. With multiple instances,
+dashboards must use `max`, not `sum`, for gauges reading the shared database.
+
+The first check creates pending, parked, and delivered outbox rows and verifies
+their exact gauges and age. An HTTP scrape must work only on the management port
+and must not contain the test's private aggregate ID or payload.
+
+Orders expose one current-state gauge per status and count/age gauges for overdue
+unfinished processes. Tasks expose state counts, expired leases, and age since a
+pending task became due; future work is excluded from overdue age. Notifications
+expose PENDING/SENT/SKIPPED/FAILED intent counts and the oldest pending age. Each
+module reads only its own schema. These gauges query live data at collection time;
+SQL failures are not converted to a misleading zero. Their scrape cost and the
+deployment's scrape timeout must be considered before scaling this portfolio
+configuration.
+
+Order milestone logs are written after the state/outbox transaction commits.
+The placement entry links HTTP `request_id` to the order's `correlation_id`.
+Internal messages, notification consumption, and send tasks carry scoped message
+or task IDs and restore the caller's MDC afterward. Only canonical UUIDs are
+accepted as order correlation IDs; non-order correlation strings are omitted
+from logging, not modified in stored messages. Event bodies and customer contact
+details are not included in these new logs. This is searchable log correlation,
+not a claim of OpenTelemetry traces across sibling services.
+
+## Running P3
+
+Use the optional observability overlay in addition to the P1 stack:
+
+```sh
+export COMPOSE_FILE=docker-compose.yml:docker-compose.portfolio.yml:docker-compose.observability.yml
+docker compose up --build --detach --wait --wait-timeout 240
+bash scripts/demo-observability.sh
+```
+
+The read-only dashboard is at `http://localhost:3001/d/ecommerce-operations`, and
+Prometheus alerts are at `http://localhost:9090/alerts`. The overlay explicitly
+replaces the app's port bindings to make management port 8081 loopback-only.
+Docker Compose 2.24.4+ is required. It adds 768 MiB of container memory limits;
+these are local demonstration limits, not sizing recommendations.
+
+The demo exercises the existing order workflow including a stock rejection, then
+checks live database-state metrics, drained Kafka outbox, sent notifications,
+HTTP traffic, histogram buckets, dashboard provisioning, rule loading, and
+committed-order logs. [The runbook](portfolio-runbook.md) documents read-only
+diagnosis, alert thresholds, dependencies, recovery, and the remaining limits.
+[ADR-029](decisions/ADR-029-portfolio-observability.md) records the chosen scope.
+
+CI runs the Java regressions, `promtool` alert tests, and the live compose demo.
+Rules are displayed in Prometheus; no paging channel or Alertmanager is claimed.
+The Kafka alert describes recent DLT recovery activity, not unresolved DLT depth.
+
 ## Evidence log
 
 | Date | Slice | Evidence | Result |
@@ -337,3 +401,9 @@ not a certification that every operational form of S1-S20 has been tested.
 | 2026-10-14 | P1 CI | Commit `872d073`; [GitHub Actions run 38580017670](https://github.com/Deepika-1201/ecommerce-order-system/actions/runs/38580017670) | Passed; P1 complete |
 | 2026-10-14 | P2 selected evidence | `./gradlew portfolioFailureTest`: 124 tests in 16 suites; JUnit XML confirms all three new fault regressions executed | Passed, none skipped |
 | 2026-10-14 | P2 regression gate | `./gradlew build`: 959 tests in 101 suites; original phase plan and failure analysis verified byte-identical to the phase 8 baseline | Passed, none skipped; CI pending |
+| 2026-10-14 | P2 CI | Commit `272155e`; [GitHub Actions run 38583313319](https://github.com/Deepika-1201/ecommerce-order-system/actions/runs/38583313319) | Build, portfolio demo, and real-gateway demo passed; P2 complete |
+| 2026-10-14 | P3 Java gate | `./gradlew build`: 975 tests in 104 suites, including queue/state metrics, management access, MDC cleanup, and commit-only correlation logs | Passed, no failures or skips |
+| 2026-10-14 | P3 alerts | Prometheus 3.15.0 `promtool test rules`: eight alerts with healthy, threshold, hold-time, independent failure, counter, NaN/missing-data, and recovery cases | Passed |
+| 2026-10-14 | P3 live demo | `bash scripts/demo-observability.sh`: rejected/cancelled orders, real Prometheus state and HTTP metrics, sent email, loaded rules, dashboard provisioning, and correlated logs | Passed |
+| 2026-10-14 | P3 dashboard | Playwright/Chrome at 1440x1000 and 390x844; all 18 PromQL expressions return series; charts and lower lazy-loaded panels render; no JavaScript errors or mobile page-width overflow | Passed; screenshots inspected locally |
+| 2026-10-14 | P3 local sizing | Grafana exceeded the initial 256 MiB limit during rendering. With 512 MiB, Go memory target 320 MiB, and automatic plugins disabled, rendering passed; sampled usage approximately 450 MiB, Prometheus 110 MiB | Local observation, not production sizing; CI pending |

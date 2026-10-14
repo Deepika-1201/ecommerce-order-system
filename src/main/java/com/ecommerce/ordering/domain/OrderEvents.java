@@ -2,17 +2,24 @@ package com.ecommerce.ordering.domain;
 
 import com.ecommerce.fulfillment.Shipments;
 import com.ecommerce.platform.Correlation;
+import com.ecommerce.platform.FlowContext;
 import com.ecommerce.platform.MessageType;
 import com.ecommerce.platform.Messages;
 import com.ecommerce.platform.Origin;
 import java.time.Instant;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Component
 class OrderEvents {
 
     static final String TOPIC = "ecom.ordering.order-events";
+
+    private static final Logger log = LoggerFactory.getLogger(OrderEvents.class);
 
     private final OrderRepository orders;
     private final Messages messages;
@@ -52,6 +59,14 @@ class OrderEvents {
             case AWAITING_PAYMENT, CANCELLING -> throw new IllegalStateException("Not an integration milestone");
         };
         messages.publish(event, origin, correlation);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try (var _ = FlowContext.message(order.id().toString(), correlation.causationId())) {
+                    log.info("order_milestone_committed status={} sequence={}", order.status(), origin.sequence());
+                }
+            }
+        });
     }
 
     @MessageType(name = "order.placed", topic = TOPIC)

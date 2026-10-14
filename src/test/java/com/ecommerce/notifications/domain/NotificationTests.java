@@ -17,6 +17,7 @@ import com.ecommerce.platform.TaskExecution;
 import com.ecommerce.platform.tasks.DueTasks;
 import com.ecommerce.support.IntegrationTest;
 import com.ecommerce.support.PlatformTables;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
@@ -42,6 +43,9 @@ class NotificationTests extends IntegrationTest {
 
     @Autowired
     private ApplicationContext context;
+
+    @Autowired
+    private MeterRegistry metrics;
 
     @MockitoBean
     private EmailDelivery email;
@@ -150,6 +154,8 @@ class NotificationTests extends IntegrationTest {
                 .isInstanceOf(EmailDelivery.Unavailable.class);
 
         assertThat(status()).isEqualTo("FAILED");
+        assertThat(metrics.get("ecom.notifications.current").tag("status", "FAILED").gauge().value()).isEqualTo(1);
+        assertThat(metrics.get("ecom.notifications.oldest.pending.age").gauge().value()).isZero();
         assertThat(jdbc.sql("SELECT finished_at IS NOT NULL FROM notifications.notifications")
                 .query(Boolean.class).single()).isTrue();
     }
@@ -162,6 +168,21 @@ class NotificationTests extends IntegrationTest {
 
         assertThat(status()).isEqualTo("SKIPPED");
         verifyNoInteractions(email);
+    }
+
+    @Test
+    void backlogGaugesTrackPendingAgeAndLeaveCompletedWorkOut() {
+        assertThat(metrics.get("ecom.notifications.current").tag("status", "PENDING").gauge().value()).isZero();
+        notifications.accept(event("order.placed", 1));
+        jdbc.sql("UPDATE notifications.notifications SET created_at = now() - interval '3 minutes'").update();
+
+        assertThat(metrics.get("ecom.notifications.current").tag("status", "PENDING").gauge().value()).isEqualTo(1);
+        assertThat(metrics.get("ecom.notifications.oldest.pending.age").gauge().value()).isBetween(180.0, 210.0);
+        DueTasks.runAll(context);
+
+        assertThat(metrics.get("ecom.notifications.current").tag("status", "PENDING").gauge().value()).isZero();
+        assertThat(metrics.get("ecom.notifications.current").tag("status", "SENT").gauge().value()).isEqualTo(1);
+        assertThat(metrics.get("ecom.notifications.oldest.pending.age").gauge().value()).isZero();
     }
 
     private IntegrationEvent event(String type, long sequence) {

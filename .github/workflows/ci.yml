@@ -26,6 +26,11 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
       - name: Build and test
         run: ./gradlew --no-daemon build
+      - name: Test portfolio alert rules
+        run: >-
+          docker run --rm --entrypoint /bin/promtool
+          -v "$PWD/deploy/observability:/work:ro" -w /work
+          prom/prometheus:v3.15.0 test rules alert-tests.yml
       - name: Upload test reports
         if: failure()
         uses: actions/upload-artifact@v7
@@ -38,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      COMPOSE_FILE: docker-compose.yml:docker-compose.portfolio.yml
+      COMPOSE_FILE: docker-compose.yml:docker-compose.portfolio.yml:docker-compose.observability.yml
     steps:
       - uses: actions/checkout@v7
       - name: Start the portfolio stack (PostgreSQL, Keycloak, S3Proxy, Kafka, Mailpit, the app)
@@ -75,6 +80,10 @@ jobs:
         run: scripts/demo-orders.sh
       - name: Portfolio P1 demo (Kafka stock hints and durable notifications captured by Mailpit)
         run: bash scripts/demo-events.sh
+      - name: Wait for the observability services
+        run: docker compose up --detach --no-deps --wait --wait-timeout 120 prometheus grafana
+      - name: Portfolio P3 demo (live metrics, correlated order logs, dashboard, and alert rules)
+        run: bash scripts/demo-observability.sh
       - name: Show logs
         if: failure()
         run: docker compose logs

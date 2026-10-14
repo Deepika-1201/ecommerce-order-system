@@ -9,10 +9,14 @@ import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+@ExtendWith(OutputCaptureExtension.class)
 class OrderIntegrationEventTests extends OrderingTest {
 
     @Autowired
@@ -99,7 +103,7 @@ class OrderIntegrationEventTests extends OrderingTest {
     }
 
     @Test
-    void failingToWriteTheEventRollsBackTheOrderAndItsCommands() {
+    void failingToWriteTheEventRollsBackTheOrderAndItsCommands(CapturedOutput output) {
         String sku = product("Rollback", 50_000, 3);
         UUID quoteId = quote(asha, KARNATAKA, null, sku, 1);
         String addressId = address(asha, KARNATAKA);
@@ -123,7 +127,22 @@ class OrderIntegrationEventTests extends OrderingTest {
         assertThat(jdbc.sql("SELECT count(*) FROM ordering.orders").query(Integer.class).single()).isZero();
         assertThat(jdbc.sql("SELECT count(*) FROM platform.outbox WHERE aggregate_type = 'order'")
                 .query(Integer.class).single()).isZero();
+        assertThat(output.getAll()).doesNotContain("order_milestone_committed");
     }
+
+        @Test
+        void committedMilestonesLinkTheApiRequestToTheOrderWithoutPii(CapturedOutput output) {
+        String sku = product("Correlated order", 50_000, 3);
+        UUID quoteId = quote(asha, KARNATAKA, null, sku, 1);
+        var response = place(asha, quoteId, address(asha, KARNATAKA), newKey());
+        UUID orderId = id(expect(202, response));
+        String requestId = response.headers().firstValue("X-Request-Id").orElseThrow();
+
+        assertThat(output.getAll().lines().filter(line -> line.contains("order_milestone_committed")))
+            .singleElement().asString().contains("request_id=" + requestId,
+                "correlation_id=" + orderId, "status=PLACED", "sequence=1")
+            .doesNotContain("Asha", "Indiranagar", "9876543210", "@example");
+        }
 
     private List<JsonNode> events(UUID orderId) {
         List<String> envelopes = jdbc.sql("""
