@@ -22,7 +22,10 @@ import java.util.concurrent.Future;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.TestPropertySource;
@@ -35,6 +38,7 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Import(TaskFixtures.class)
 @TestPropertySource(properties = "spring.jackson.deserialization.fail-on-unknown-properties=true")
+@ExtendWith(OutputCaptureExtension.class)
 class TaskSchedulerTests extends IntegrationTest {
 
     private static final String[] RECORD_TYPE = {TaskFixtures.RECORD};
@@ -111,7 +115,7 @@ class TaskSchedulerTests extends IntegrationTest {
         runAllDue();
         assertThat(tasks.labels()).isEmpty();
         assertThat(state("x").status()).isEqualTo("PENDING");
-        assertThat(state("x").lastError()).contains("Injected task failure");
+        assertThat(state("x").lastError()).isEqualTo("java.lang.IllegalStateException");
         assertThat(count("SELECT count(*) FROM platform.scheduled_tasks WHERE run_at > now() + interval '5 seconds'"))
                 .as("waits for its backoff")
                 .isEqualTo(1);
@@ -309,6 +313,19 @@ class TaskSchedulerTests extends IntegrationTest {
         assertThat(metrics.get("ecom.tasks.current").tag("status", "PENDING").gauge().value()).isEqualTo(1);
         assertThat(metrics.get("ecom.tasks.current").tag("status", "SUCCEEDED").gauge().value()).isEqualTo(1);
         assertThat(metrics.get("ecom.tasks.oldest.due.age").gauge().value()).isZero();
+    }
+
+    @Test
+    void failedTaskDiagnosticsDoNotStoreOrLogPayloadValues(CapturedOutput output) {
+        String privateValue = "private-token-value for asha@example.test";
+        tasks.failNext(privateValue, 1);
+        schedule(record(privateValue));
+
+        runAllDue();
+
+        assertThat(state(privateValue).status()).isEqualTo("PENDING");
+        assertThat(state(privateValue).lastError()).isEqualTo("java.lang.IllegalStateException");
+        assertThat(output.getAll()).doesNotContain("private-token-value", "asha@example.test");
     }
 
     private static TaskRequest record(String label) {

@@ -1,5 +1,6 @@
 package com.ecommerce.platform.messaging;
 
+import com.ecommerce.platform.FailureDetails;
 import com.ecommerce.platform.FlowContext;
 import com.ecommerce.platform.IncomingMessage;
 import com.ecommerce.platform.WorkerComponent;
@@ -14,7 +15,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
-import org.springframework.core.NestedExceptionUtils;
 import org.springframework.transaction.support.TransactionTemplate;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
@@ -133,13 +133,13 @@ class Dispatcher implements SmartLifecycle {
         int attempts = message.attempts() + 1;
         boolean park = failure instanceof UnreadableMessageException || attempts >= properties.maxAttempts();
         Duration retryAfter = Backoff.delay(attempts, properties.initialBackoff(), properties.maxBackoff());
-        String error = NestedExceptionUtils.getMostSpecificCause(failure).toString();
+        String error = FailureDetails.summarize(failure);
         if (park) {
-            log.error("Parked message {} for {} after {} attempts", message.messageId(), message.destination(),
-                    attempts, failure);
+            log.error("Parked message {} for {} after {} attempts; failure={}", message.messageId(),
+                message.destination(), attempts, error);
         } else {
-            log.warn("Delivery of message {} to {} failed (attempt {}); retrying in {}", message.messageId(),
-                    message.destination(), attempts, retryAfter, failure);
+            log.warn("Delivery of message {} to {} failed (attempt {}); retrying in {}; failure={}",
+                message.messageId(), message.destination(), attempts, retryAfter, error);
         }
         transactions.executeWithoutResult(status -> outbox.recordFailure(message.id(), error, retryAfter, park));
     }

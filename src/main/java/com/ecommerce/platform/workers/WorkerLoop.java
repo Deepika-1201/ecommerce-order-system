@@ -1,5 +1,6 @@
 package com.ecommerce.platform.workers;
 
+import com.ecommerce.platform.FailureDetails;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -76,7 +77,7 @@ public final class WorkerLoop {
                 failures = 0;
             } catch (RuntimeException e) {
                 failures++;
-                log.error("{} failed ({} in a row)", name, failures, e);
+                log.error("{} failed ({} in a row); failure={}", name, failures, FailureDetails.summarize(e));
             }
             if (!worked && !stopping) {
                 Duration wait = failures == 0 ? pollInterval : Backoff.delay(failures, pollInterval, MAX_FAILURE_WAIT);

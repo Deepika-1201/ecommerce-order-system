@@ -62,7 +62,7 @@ class TaskFixtures {
         void record(TaskExecution<RecordTask> task) {
             AtomicInteger remaining = failures.get(task.payload().label());
             if (remaining != null && remaining.getAndDecrement() > 0) {
-                throw new IllegalStateException("Injected task failure");
+                throw new IllegalStateException("Injected task failure for " + task.payload().label());
             }
             write(task.taskId(), RECORD, task.attempt(), task.payload().label());
         }

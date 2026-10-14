@@ -26,6 +26,24 @@ jobs:
       - uses: gradle/actions/setup-gradle@v5
       - name: Build and test
         run: ./gradlew --no-daemon build
+      - name: Install pinned security scanner
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
+        with:
+          version: v0.76.0
+          cache: true
+      - name: Check security policy, packaged dependencies, and source secrets
+        run: |
+          node scripts/check-security-report.mjs --self-test
+          bash scripts/check-security.sh jar
+          bash scripts/check-security.sh secrets
+      - name: Upload dependency security report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jar-security-report
+          path: build/reports/security/jar-vulnerabilities.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Test portfolio alert rules
         run: >-
           docker run --rm --entrypoint /bin/promtool
@@ -84,6 +102,21 @@ jobs:
         run: docker compose up --detach --no-deps --wait --wait-timeout 120 prometheus grafana
       - name: Portfolio P3 demo (live metrics, correlated order logs, dashboard, and alert rules)
         run: bash scripts/demo-observability.sh
+      - name: Install pinned image scanner
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
+        with:
+          version: v0.76.0
+          cache: true
+      - name: Scan the application image that ran the demos
+        run: bash scripts/check-security.sh image "$(docker compose images -q app)"
+      - name: Upload image security report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-security-report
+          path: build/reports/security/image-vulnerabilities.json
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Show logs
         if: failure()
         run: docker compose logs

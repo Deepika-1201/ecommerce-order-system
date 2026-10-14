@@ -6,6 +6,6 @@ import java.util.UUID;
 class UnreadableMessageException extends RuntimeException {
 
     UnreadableMessageException(UUID messageId, Throwable cause) {
-        super("Message " + messageId + " cannot be read: " + cause.getMessage(), cause);
+        super("Message " + messageId + " cannot be read", cause);
     }
 }

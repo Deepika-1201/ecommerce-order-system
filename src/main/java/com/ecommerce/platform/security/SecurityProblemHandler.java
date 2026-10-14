@@ -30,7 +30,7 @@ class SecurityProblemHandler implements AuthenticationEntryPoint, AccessDeniedHa
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException exception)
             throws IOException {
-        log.debug("Refused unauthenticated request: {}", exception.getMessage());
+        log.debug("Refused unauthenticated request ({})", exception.getClass().getSimpleName());
         response.setHeader(HttpHeaders.WWW_AUTHENTICATE,
                 exception instanceof OAuth2AuthenticationException ? "Bearer error=\"invalid_token\"" : "Bearer");
         problems.write(request, response, HttpStatus.UNAUTHORIZED, "unauthorized",

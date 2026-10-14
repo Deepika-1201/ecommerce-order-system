@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.SerializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -65,7 +66,22 @@ class OpenApiDocumentTests extends IntegrationTest {
         assertThat(ids).doesNotHaveDuplicates().noneMatch(id -> id.matches(".*_\\d+"));
     }
 
-    /** springdoc names a schema after its class's simple name: two web records with one name would share a schema. */
+        @Test
+        void operationsDocumentTheRateLimitResponseAndRetryDelay() {
+        JsonNode document = json(get(managementPort, "/actuator/openapi"));
+        List<JsonNode> operations = document.path("paths").valueStream().flatMap(JsonNode::valueStream)
+            .filter(operation -> operation.has("operationId")).toList();
+
+        assertThat(operations).isNotEmpty().allSatisfy(operation ->
+            assertThat(operation.path("responses").path("429").path("$ref").asString())
+                .isEqualTo("#/components/responses/RateLimited"));
+        assertThat(document.at("/components/responses/RateLimited/headers/Retry-After/schema/minimum").asInt())
+            .isEqualTo(1);
+        assertThat(document.at("/components/schemas/RateLimitProblem/properties/code/enum/0").asString())
+            .isEqualTo("rate_limited");
+        }
+
+        /** springdoc names a schema after its class's simple name: two web records with one name would share a schema. */
     @Test
     void requestAndResponseRecordsHaveNamesOfTheirOwn() {
         Map<String, List<String>> byName = new ClassFileImporter()

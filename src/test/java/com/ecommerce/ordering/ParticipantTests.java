@@ -317,7 +317,8 @@ class ParticipantTests extends OrderingTest {
 
         assertThatThrownBy(() -> command(new RefundPayment(unpaid, 123_400, RefundReason.ORDER_CANCELLED), unpaid))
                 .isInstanceOf(AssertionError.class)
-                .hasMessageContaining("cannot be refunded: its payment is REQUIRES_PAYMENT");
+            .hasMessageContaining("payments.refund-payment to handler:payments.refund-payment: "
+                + "java.lang.IllegalStateException");
         assertThat(refunds(unpaid)).isEmpty();
     }
 
@@ -327,10 +328,21 @@ class ParticipantTests extends OrderingTest {
 
         assertThatThrownBy(() -> command(new CancelPayment(orderId)))
                 .isInstanceOf(AssertionError.class)
-                .hasMessageContaining("Order " + orderId + " has no payment");
+            .hasMessageContaining("payments.cancel-payment to handler:payments.cancel-payment: "
+                + "java.lang.IllegalStateException");
         assertThatThrownBy(() -> command(new CheckPayment(unchecked), unchecked))
                 .isInstanceOf(AssertionError.class)
-                .hasMessageContaining("Order " + unchecked + " has no payment");
+            .hasMessageContaining("payments.check-payment to handler:payments.check-payment: "
+                + "java.lang.IllegalStateException");
+        assertThat(jdbc.sql("""
+                SELECT count(*) FROM platform.outbox
+                WHERE aggregate_id IN (:cancelled, :unchecked)
+                  AND type IN ('payments.cancel-payment', 'payments.check-payment')
+                  AND last_error = 'java.lang.IllegalStateException' AND attempts >= 1
+                  AND delivered_at IS NULL AND parked_at IS NULL AND next_attempt_at > now()
+                """)
+            .param("cancelled", orderId.toString()).param("unchecked", unchecked.toString())
+            .query(Integer.class).single()).isEqualTo(2);
     }
 
     @Test

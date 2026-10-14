@@ -2,6 +2,9 @@ package com.ecommerce.platform.security;
 
 import com.ecommerce.platform.CallerRole;
 import com.ecommerce.platform.HttpAccessRules;
+import com.ecommerce.platform.web.ProblemResponses;
+import io.github.bucket4j.TimeMeter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.servlet.DispatcherType;
 import java.time.Duration;
 import java.util.Collection;
@@ -26,7 +29,9 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtClaimNames;
 import org.springframework.security.oauth2.jwt.JwtClaimValidator;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.web.client.RestTemplate;
 
 /**
@@ -38,7 +43,8 @@ class SecurityConfiguration {
 
     @Bean
     SecurityFilterChain securityFilterChain(HttpSecurity http, List<HttpAccessRules> moduleRules,
-            SecurityProblemHandler problems) throws Exception {
+            SecurityProblemHandler problems, RequestLimits limits, RateLimitProperties settings,
+            ProblemResponses responses) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
@@ -50,6 +56,10 @@ class SecurityConfiguration {
                         .authenticationEntryPoint(problems)
                         .accessDeniedHandler(problems)
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(SecurityConfiguration::authenticate)))
+                .addFilterBefore(new RequestLimitFilters.BeforeAuthentication(limits, settings, responses),
+                    BearerTokenAuthenticationFilter.class)
+                .addFilterBefore(new RequestLimitFilters.AfterAuthentication(limits, settings, responses),
+                    AuthorizationFilter.class)
                 .authorizeHttpRequests(rules -> {
                     rules.dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.FORWARD).permitAll();
                     // The management port is internal (LLD §1.3); /livez and /readyz are the probes on the main port.
@@ -61,6 +71,11 @@ class SecurityConfiguration {
                     rules.anyRequest().denyAll();
                 });
         return http.build();
+    }
+
+    @Bean
+    RequestLimits requestLimits(RateLimitProperties settings, MeterRegistry metrics) {
+        return new RequestLimits(settings, metrics, TimeMeter.SYSTEM_NANOTIME);
     }
 
     /** Every token must name its user; Boot adds this to the signature, time, issuer and audience checks. */

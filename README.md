@@ -44,6 +44,11 @@ for diagnosis and recovery. The overlay requires Docker Compose 2.24.4+ and
 restricts the management port to localhost. These are local portfolio tools,
 not a production paging or cross-service tracing deployment.
 
+P4 enables bounded application rate limits, safe failure diagnostics, and CI
+checks for packaged dependencies, the application image, and source secrets.
+Quotas, scan commands, and deployment limits are in
+[docs/portfolio-security.md](docs/portfolio-security.md).
+
 ## Quick start
 
 JDK 25 is required; Docker is optional.

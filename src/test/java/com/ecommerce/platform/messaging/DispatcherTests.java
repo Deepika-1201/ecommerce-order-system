@@ -80,7 +80,7 @@ class DispatcherTests extends IntegrationTest {
         assertThat(handlers.steps(RECORDER, "a")).as("rolled back").isEmpty();
         assertThat(recorderRow("a")).satisfies(row -> {
             assertThat(row.attempts()).isEqualTo(1);
-            assertThat(row.lastError()).contains("Injected failure");
+            assertThat(row.lastError()).isEqualTo("java.lang.IllegalStateException");
             assertThat(row.retryScheduled()).as("waits for its backoff").isTrue();
         });
 

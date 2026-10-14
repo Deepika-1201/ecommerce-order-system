@@ -9,7 +9,8 @@ RUN ./gradlew --no-daemon bootJar && \
     java -Djarmode=tools -jar build/libs/ecommerce-order-system-*.jar extract --layers --launcher --destination build/extracted
 
 FROM eclipse-temurin:25-jre
-RUN groupadd --system app && useradd --system --gid app --home /app app
+RUN rm -f /usr/bin/pebble && \
+    groupadd --system app && useradd --system --gid app --home /app app
 WORKDIR /app
 COPY --from=build /workspace/build/extracted/dependencies/ ./
 COPY --from=build /workspace/build/extracted/spring-boot-loader/ ./

@@ -1,5 +1,6 @@
 package com.ecommerce.platform.workers;
 
+import com.ecommerce.platform.FailureDetails;
 import com.ecommerce.platform.WorkerComponent;
 import java.sql.Connection;
 import java.sql.SQLException;
@@ -86,7 +87,8 @@ class NotificationListener implements SmartLifecycle {
                 if (!running) {
                     return;
                 }
-                log.warn("Notification listener lost its connection; reconnecting in {} (polling continues)", reconnectWait, e);
+                log.warn("Notification listener lost its connection; reconnecting in {} (polling continues); failure={}",
+                    reconnectWait, FailureDetails.summarize(e));
                 try {
                     Thread.sleep(reconnectWait);
                 } catch (InterruptedException interrupted) {

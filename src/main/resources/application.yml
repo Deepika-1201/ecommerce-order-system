@@ -45,6 +45,7 @@ spring:
 
 server:
   port: ${PORT:8080}
+  forward-headers-strategy: none
 
 ecom:
   roles: ${ECOM_ROLES:api,worker}

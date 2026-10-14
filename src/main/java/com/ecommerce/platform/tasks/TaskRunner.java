@@ -1,5 +1,6 @@
 package com.ecommerce.platform.tasks;
 
+import com.ecommerce.platform.FailureDetails;
 import com.ecommerce.platform.FlowContext;
 import com.ecommerce.platform.TaskExecution;
 import com.ecommerce.platform.WorkerComponent;
@@ -12,7 +13,6 @@ import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
-import org.springframework.core.NestedExceptionUtils;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
@@ -107,19 +107,20 @@ class TaskRunner implements SmartLifecycle {
     }
 
     private void recordFailure(ClaimedTask task, RuntimeException failure, boolean unreadable) {
-        String error = NestedExceptionUtils.getMostSpecificCause(failure).toString();
+        String error = FailureDetails.summarize(failure);
         boolean recorded;
         if (task.recurring()) {
-            log.warn("Recurring task {} failed; it runs again after its interval", task.type(), failure);
+            log.warn("Recurring task {} failed; it runs again after its interval; failure={}", task.type(), error);
             recorded = repository.failRecurring(task, error);
         } else {
             boolean dead = unreadable || task.attempt() >= task.maxAttempts();
             Duration retryAfter = Backoff.delay(task.attempt(), properties.initialBackoff(), properties.maxBackoff());
             if (dead) {
-                log.error("Task {} ({}) is dead after {} attempts", task.id(), task.type(), task.attempt(), failure);
+                log.error("Task {} ({}) is dead after {} attempts; failure={}", task.id(), task.type(), task.attempt(),
+                    error);
             } else {
-                log.warn("Task {} ({}) failed attempt {}; retrying in {}", task.id(), task.type(), task.attempt(),
-                        retryAfter, failure);
+                log.warn("Task {} ({}) failed attempt {}; retrying in {}; failure={}", task.id(), task.type(),
+                    task.attempt(), retryAfter, error);
             }
             recorded = repository.fail(task, error, retryAfter, dead);
         }

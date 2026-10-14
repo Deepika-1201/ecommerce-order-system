@@ -1,5 +1,6 @@
 package com.ecommerce.platform.messaging;
 
+import com.ecommerce.platform.FailureDetails;
 import com.ecommerce.platform.WorkerComponent;
 import com.ecommerce.platform.workers.Backoff;
 import com.ecommerce.platform.workers.Wakeups;
@@ -17,7 +18,6 @@ import org.apache.kafka.clients.producer.ProducerRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
-import org.springframework.core.NestedExceptionUtils;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -119,8 +119,8 @@ class KafkaRelay implements SmartLifecycle {
     }
 
     private void recordFailures(List<PendingMessage> batch, RuntimeException failure) {
-        String error = NestedExceptionUtils.getMostSpecificCause(failure).toString();
-        log.warn("Relaying {} messages to Kafka failed; they will be retried", batch.size(), failure);
+        String error = FailureDetails.summarize(failure);
+        log.warn("Relaying {} messages to Kafka failed; they will be retried; failure={}", batch.size(), error);
         transactions.executeWithoutResult(status -> batch.forEach(message -> outbox.recordFailure(message.id(),
                 error,
                 Backoff.delay(message.attempts() + 1, properties.initialBackoff(), properties.maxBackoff()),

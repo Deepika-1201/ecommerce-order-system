@@ -1,6 +1,7 @@
 package com.ecommerce.platform.web;
 
 import com.ecommerce.platform.ApiException;
+import com.ecommerce.platform.FailureDetails;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -59,7 +60,7 @@ final class ProblemDetailsHandler extends ResponseEntityExceptionHandler {
             problem.setProperty("errors", fieldViolations(invalid));
         }
         if (status.is5xxServerError()) {
-            log.error("Request failed with status {}", status.value(), exception);
+            log.error("Request failed with status {}; failure={}", status.value(), FailureDetails.summarize(exception));
         }
         return super.handleExceptionInternal(exception, problem, headers, status, request);
     }

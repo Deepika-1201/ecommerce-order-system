@@ -33,3 +33,4 @@ Format: Context → Problem → Options considered → Decision → Trade-offs �
 | [ADR-027](ADR-027-stock-event-keys.md) | Compacted stock events are keyed by SKU and location, matching their independent versions | Accepted |
 | [ADR-028](ADR-028-durable-email-notifications.md) | Durable deduplicated notification intents; asynchronous, bounded, at-least-once SMTP delivery | Accepted |
 | [ADR-029](ADR-029-portfolio-observability.md) | Module-owned database gauges and correlated committed-work logs, with an optional local Prometheus/Grafana stack | Accepted |
+| [ADR-030](ADR-030-application-rate-limits.md) | Bounded process-local IP and authenticated-write token buckets, with independent API/webhook ceilings | Accepted |

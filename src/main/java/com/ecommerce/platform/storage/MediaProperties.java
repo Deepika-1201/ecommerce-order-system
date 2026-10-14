@@ -24,6 +24,16 @@ public record MediaProperties(
         String accessKey,
         String secretKey) {
 
+    @Override
+    public String toString() {
+        return "MediaProperties[bucket=" + bucket + ", region=" + region
+                + ", endpoint=" + (endpoint == null ? "default" : "configured")
+                + ", presignEndpoint=" + (presignEndpoint == null ? "default" : "configured")
+                + ", publicBaseUrl=configured, objectAcl=" + objectAcl + ", pathStyle=" + pathStyle
+                + ", accessKey=" + (accessKey == null ? "unset" : "***")
+                + ", secretKey=" + (secretKey == null ? "unset" : "***") + "]";
+    }
+
     /** {@code PUBLIC_READ} where storage serves images directly (locally); {@code NONE} behind a CDN (AWS). */
     public enum ObjectAcl {
         NONE,

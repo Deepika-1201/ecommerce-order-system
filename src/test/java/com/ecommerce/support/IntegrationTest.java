@@ -31,6 +31,7 @@ import tools.jackson.databind.json.JsonMapper;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "management.server.port=0")
 @TestPropertySource(properties = {
     "ecom.workers.autostart=false",
+    "ecom.security.rate-limits.enabled=false",
     "spring.datasource.hikari.maximum-pool-size=10",
     "spring.datasource.hikari.minimum-idle=1",
     "ecom.payments.gateway.webhook-secrets=" + IntegrationTest.WEBHOOK_SECRET + "," + IntegrationTest.OLD_WEBHOOK_SECRET,

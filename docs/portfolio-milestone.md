@@ -21,8 +21,8 @@ documentation, and CI. They are not elapsed AI-session time or a deadline.
 |---|---|---|---|---|
 | P1 | Kafka integration events and notifications | Phase 9 | 18-26 | Done: `872d073`, CI green |
 | P2 | Focused failure and recovery demonstrations | Selected phase 11 work | 10-16 | Done: `272155e`, CI green |
-| P3 | Essential metrics, dashboard, alerts, and runbook | Reduced phase 12 | 10-16 | Local verification passed; CI pending |
-| P4 | Essential security hardening and CI checks | Reduced phase 13 | 8-12 | Not started |
+| P3 | Essential metrics, dashboard, alerts, and runbook | Reduced phase 12 | 10-16 | Done: `55114a9`, CI green |
+| P4 | Essential security hardening and CI checks | Reduced phase 13 | 8-12 | Local verification passed; CI pending |
 | P5 | Measured load and stock-contention evidence | Reduced phase 16 | 12-20 | Not started |
 | P6 | Reproducible demo and portfolio presentation | Selected phase 18 work | 6-10 | Not started |
 | Total | Portfolio milestone | | 64-100 | |
@@ -391,6 +391,69 @@ CI runs the Java regressions, `promtool` alert tests, and the live compose demo.
 Rules are displayed in Prometheus; no paging channel or Alertmanager is claimed.
 The Kafka alert describes recent DLT recovery activity, not unresolved DLT depth.
 
+## P4 implementation design
+
+Preserve the existing resource-server, ownership, role, idempotency, and webhook
+checks. Start at observable data boundaries: authentication failures must not log
+the exception's token-bearing details, even with debug logging enabled. The first
+regression injects a token/email into an authentication exception and verifies
+the existing 401 problem response and challenge remain unchanged while the log
+contains only a bounded exception type.
+
+Follow with application rate limits, a focused review of stored/logged failure
+details and secrets, and CI scanning of the shipped jar and application image.
+Record limits and accepted local-only configurations explicitly; this milestone
+does not claim a completed OWASP certification or distributed edge protection.
+
+Rate limiting uses Bucket4j with bounded local client state and independent API
+and webhook ceilings. The exact quotas, authentication ordering, peer identity,
+cache-eviction behavior, and deployment limitations are recorded in
+[ADR-030](decisions/ADR-030-application-rate-limits.md). The first core checks use
+a controlled monotonic clock for refill/Retry-After, concurrent consumption,
+independent lanes, cache bounds, and fixed-cardinality metrics.
+
+HTTP tests explicitly enable small quotas and prove the security-filter ordering:
+invalid tokens consume the early peer quota; per-subject writes stop before MVC
+and idempotency; read requests, health probes, and management remain available;
+webhook authentication has its own lane; forwarded headers and encoded path
+characters do not bypass the peer limit. Ordinary integration fixtures turn the
+limiter off so unrelated domain tests do not compete for a shared loopback quota.
+
+Stored retry errors and operational failure logs retain only the root exception
+class and, for SQL errors, a validated five-character SQLSTATE. Exception text,
+SQL statements, failed rows, and nested/suppressed messages are not copied. Task
+IDs, message IDs, retry counts, and P3 correlation provide the diagnostic link.
+The regression injects a fake token/email into a real task failure and verifies
+retry remains possible without retaining those values in `last_error` or logs.
+
+The initial binary-artifact vulnerability scan found 14 HIGH/CRITICAL entries
+across 150 packaged dependencies. Use Tomcat 11.0.25, Jackson 3.1.7 and 2.21.7
+BOM overrides and LZ4 1.11.4 rather than changing framework major versions.
+Scanning a jar directory with a source-only command is not evidence: the check
+must report a nonempty package inventory from `trivy rootfs` or an image scan.
+
+## Running P4 checks
+
+[Portfolio security](portfolio-security.md) records quotas, local-only credentials,
+diagnostic redaction, scanner policy, and deployment responsibilities. The limits
+are enabled by default in the application. Dedicated HTTP and controlled-clock
+tests cover rejection, refill, lane separation, bypass attempts, safe error
+responses, configuration validation, and unaffected probes.
+
+```sh
+./gradlew build
+node scripts/check-security-report.mjs --self-test
+bash scripts/check-security.sh jar
+bash scripts/check-security.sh secrets
+bash scripts/check-security.sh image ecommerce-order-system-app
+```
+
+The scan commands require Trivy 0.76.0 on PATH (or `TRIVY=/path/to/trivy`), Node
+18+, and a freshly built image for the last command. CI installs the pinned
+scanner automatically. Dependency/image reports are retained for seven days;
+secret reports are private temporary files and are not uploaded. A passing scan
+is evidence for its advisory database snapshot, not a permanent security claim.
+
 ## Evidence log
 
 | Date | Slice | Evidence | Result |
@@ -407,3 +470,9 @@ The Kafka alert describes recent DLT recovery activity, not unresolved DLT depth
 | 2026-10-14 | P3 live demo | `bash scripts/demo-observability.sh`: rejected/cancelled orders, real Prometheus state and HTTP metrics, sent email, loaded rules, dashboard provisioning, and correlated logs | Passed |
 | 2026-10-14 | P3 dashboard | Playwright/Chrome at 1440x1000 and 390x844; all 18 PromQL expressions return series; charts and lower lazy-loaded panels render; no JavaScript errors or mobile page-width overflow | Passed; screenshots inspected locally |
 | 2026-10-14 | P3 local sizing | Grafana exceeded the initial 256 MiB limit during rendering. With 512 MiB, Go memory target 320 MiB, and automatic plugins disabled, rendering passed; sampled usage approximately 450 MiB, Prometheus 110 MiB | Local observation, not production sizing; CI pending |
+| 2026-10-14 | P3 CI | Commit `55114a9`; [GitHub Actions run 38592878291](https://github.com/Deepika-1201/ecommerce-order-system/actions/runs/38592878291) | Java build, alert tests, portfolio demo, and real-gateway regressions passed; P3 complete |
+| 2026-10-14 | P4 regression gate | `./gradlew build`: 995 tests in 110 suites, including HTTP limits, defaults/binding, safe diagnostics, secret masking, and generated 429 responses | Passed, no failures or skips |
+| 2026-10-14 | P4 jar scan | Trivy 0.76.0 binary-artifact scan; 150 Java packages inventoried; initial 14 HIGH/CRITICAL findings fixed with compatible patches | Zero HIGH/CRITICAL findings in rebuilt jar |
+| 2026-10-14 | P4 image scan | Exact rebuilt application image; 150 Java and 106 OS packages inventoried; unused vulnerable Pebble supervisor removed | Zero HIGH/CRITICAL findings, including unfixed |
+| 2026-10-14 | P4 source and policy | Recognized-secret scan plus report-policy checks for missing inventory, fixable findings, and redacted secret errors | Passed; no recognized secret matches; Git history and unknown secret formats not claimed |
+| 2026-10-14 | P4 live workflows | Scanned image started as the non-root app; event/Mailpit and observability demos ran with rate limits enabled | Passed; CI pending |

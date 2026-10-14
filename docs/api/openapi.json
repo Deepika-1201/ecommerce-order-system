@@ -1,5 +1,27 @@
 {
   "components" : {
+    "responses" : {
+      "RateLimited" : {
+        "content" : {
+          "application/problem+json" : {
+            "schema" : {
+              "$ref" : "#/components/schemas/RateLimitProblem"
+            }
+          }
+        },
+        "description" : "Application request quota exhausted; retry after the indicated delay.",
+        "headers" : {
+          "Retry-After" : {
+            "description" : "Whole seconds until a token is available",
+            "schema" : {
+              "format" : "int32",
+              "minimum" : 1,
+              "type" : "integer"
+            }
+          }
+        }
+      }
+    },
     "schemas" : {
       "AddressList" : {
         "properties" : {
@@ -1379,6 +1401,35 @@
           }
         }
       },
+      "RateLimitProblem" : {
+        "properties" : {
+          "code" : {
+            "enum" : [ "rate_limited" ],
+            "type" : "string"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "instance" : {
+            "type" : "string"
+          },
+          "request_id" : {
+            "type" : "string"
+          },
+          "status" : {
+            "enum" : [ 429 ],
+            "format" : "int32",
+            "type" : "integer"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          }
+        },
+        "required" : [ "code", "detail", "instance", "status", "title", "type" ]
+      },
       "ReceiveStock" : {
         "properties" : {
           "quantity" : {
@@ -1722,6 +1773,9 @@
               }
             },
             "description" : "Created"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -1763,6 +1817,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -1804,6 +1861,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -1869,6 +1929,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -1899,6 +1962,9 @@
               }
             },
             "description" : "Created"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -1930,6 +1996,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -1976,6 +2045,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2007,6 +2079,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2038,6 +2113,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2079,6 +2157,9 @@
               }
             },
             "description" : "Created"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2111,6 +2192,9 @@
         "responses" : {
           "204" : {
             "description" : "No Content"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2150,6 +2234,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2191,6 +2278,9 @@
               }
             },
             "description" : "Created"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2240,6 +2330,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2281,6 +2374,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2311,6 +2407,9 @@
               }
             },
             "description" : "Created"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2342,6 +2441,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2381,6 +2483,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2403,6 +2508,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "The category tree, sorted by name",
@@ -2430,6 +2538,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "Read the cart with current prices",
@@ -2447,6 +2558,9 @@
               }
             },
             "description" : "Created"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "Create a guest cart; its token is in the response, this once",
@@ -2481,6 +2595,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "Remove the coupon",
@@ -2523,6 +2640,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "Apply a coupon, replacing any other",
@@ -2564,6 +2684,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "Remove a line; removing a line that is not there changes nothing",
@@ -2613,6 +2736,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "Set a line's quantity (1-10), adding the line if needed",
@@ -2650,6 +2776,9 @@
               }
             },
             "description" : "Created"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "Quote the cart for a delivery state: prices, discount, GST and shipping, valid 10 minutes",
@@ -2685,6 +2814,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "Read one of this cart's quotes",
@@ -2704,6 +2836,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2734,6 +2869,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2756,6 +2894,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2786,6 +2927,9 @@
               }
             },
             "description" : "Created"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2810,6 +2954,9 @@
         "responses" : {
           "204" : {
             "description" : "No Content"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2839,6 +2986,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2878,6 +3028,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2909,6 +3062,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2931,6 +3087,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2961,6 +3120,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -2999,6 +3161,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3036,6 +3201,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3081,6 +3249,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3111,6 +3282,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3143,6 +3317,9 @@
               }
             },
             "description" : "Created"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3174,6 +3351,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3215,6 +3395,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3254,6 +3437,9 @@
               }
             },
             "description" : "The order, PLACED"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3285,6 +3471,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3324,6 +3513,9 @@
               }
             },
             "description" : "The order, CANCELLING or already CANCELLED"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3355,6 +3547,9 @@
               }
             },
             "description" : "The order; it moves on once the payment's outcome is known"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3412,6 +3607,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "Browse active products, newest first, or search them by relevance with q",
@@ -3440,6 +3638,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "An active product with its active variants and images",
@@ -3459,6 +3660,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "States and union territories with their GST state codes",
@@ -3487,6 +3691,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3536,6 +3743,9 @@
               }
             },
             "description" : "The order, CANCELLING or already CANCELLED"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3560,6 +3770,9 @@
         "responses" : {
           "202" : {
             "description" : "The booking is pending again"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3611,6 +3824,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3642,6 +3858,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3673,6 +3892,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3714,6 +3936,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3744,6 +3969,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3792,6 +4020,9 @@
               }
             },
             "description" : "The stock levels after the adjustment"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3840,6 +4071,9 @@
               }
             },
             "description" : "OK"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3888,6 +4122,9 @@
               }
             },
             "description" : "The stock levels after the receipt"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "security" : [ {
@@ -3923,6 +4160,9 @@
         "responses" : {
           "200" : {
             "description" : "Stored, or already known"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "Receive a tracking scan from the carrier; a known event id changes nothing",
@@ -3955,6 +4195,9 @@
         "responses" : {
           "200" : {
             "description" : "Stored, or already known"
+          },
+          "429" : {
+            "$ref" : "#/components/responses/RateLimited"
           }
         },
         "summary" : "Receive a payment or refund event from the gateway; a known event id changes nothing",

@@ -7,6 +7,10 @@ plugins {
 group = "com.ecommerce"
 version = "0.1.0-SNAPSHOT"
 
+extra["tomcat.version"] = "11.0.25"
+extra["jackson-bom.version"] = "3.1.7"
+extra["jackson-2-bom.version"] = "2.21.7"
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(25)
@@ -38,6 +42,11 @@ dependencyManagement {
 val s3proxy: Configuration by configurations.creating
 
 dependencies {
+    constraints {
+        implementation("at.yawk.lz4:lz4-java:1.11.4") {
+            because("Fix CVE-2026-106451 in Kafka's compression dependency")
+        }
+    }
     s3proxy("org.gaul:s3proxy:$s3proxyVersion:jar-with-dependencies") {
         isTransitive = false
     }
@@ -51,6 +60,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-mail")
     implementation("com.networknt:json-schema-validator:$jsonSchemaValidatorVersion")
     implementation("org.springframework.boot:spring-boot-starter-security-oauth2-resource-server")
+    implementation("com.bucket4j:bucket4j_jdk17-core:8.21.0")
+    implementation("com.github.ben-manes.caffeine:caffeine")
     implementation("software.amazon.awssdk:s3") {
         exclude(group = "software.amazon.awssdk", module = "apache-client")
         exclude(group = "software.amazon.awssdk", module = "netty-nio-client")
