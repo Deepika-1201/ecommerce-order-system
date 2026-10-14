@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "run_id": "contention-20261014T174136-94717",
+  "workload": "contention",
+  "passed": true,
+  "configuration": {
+    "buyers": 24,
+    "stock_units": 1,
+    "customer_accounts": 2,
+    "outcome_timeout_seconds": 60
+  },
+  "scenario_duration_seconds": 0.505,
+  "measured_http_requests": 97,
+  "measured_http_requests_per_second": 192.07920792079207,
+  "unexpected_responses": 0,
+  "throttled_responses": 0,
+  "placement_latency_ms": {
+    "med": 61.0160815,
+    "p(95)": 72.6373476,
+    "p(99)": 77.09373925,
+    "max": 78.392624
+  },
+  "replay_latency_ms": {
+    "med": 19.375840500000002,
+    "p(95)": 48.11744549999999,
+    "p(99)": 54.01131182,
+    "max": 55.303651
+  },
+  "outcome_latency_ms": {
+    "med": 312,
+    "p(95)": 347,
+    "p(99)": 468.65999999999997,
+    "max": 505
+  },
+  "outcomes": {
+    "payment_ready": 1,
+    "stock_rejected": 23,
+    "idempotent_replays": 24
+  },
+  "audit": {
+    "schema_version": 1,
+    "run_id": "contention-20261014T174136-94717",
+    "sku": "LOAD-CONTENTION-20261014T174136-94717",
+    "stock_rows": 1,
+    "on_hand": 1,
+    "reserved": 1,
+    "available": 0,
+    "counters_valid": true,
+    "movement_units": 1,
+    "orders": 24,
+    "payment_ready": 1,
+    "stock_rejected": 23,
+    "active_reservations": 1,
+    "reserved_units": 1,
+    "reservation_links_valid": true,
+    "replay_rows": 24,
+    "distinct_replay_orders": 24,
+    "replay_links_valid": true,
+    "catalog_products": 32,
+    "captured_at": "2026-10-14T17:41:44.962838+00:00"
+  }
+}

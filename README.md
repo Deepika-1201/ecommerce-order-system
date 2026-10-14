@@ -49,6 +49,12 @@ checks for packaged dependencies, the application image, and source secrets.
 Quotas, scan commands, and deployment limits are in
 [docs/portfolio-security.md](docs/portfolio-security.md).
 
+P5 provides bounded k6 catalogue and checkout-contention workloads with database
+invariant audits. Run `bash scripts/run-load.sh browse` or
+`bash scripts/run-load.sh contention` against the local portfolio stack.
+[docs/portfolio-performance.md](docs/portfolio-performance.md) contains measured
+results, raw reports, exact reproduction commands, and their limitations.
+
 ## Quick start
 
 JDK 25 is required; Docker is optional.

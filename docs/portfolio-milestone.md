@@ -22,8 +22,8 @@ documentation, and CI. They are not elapsed AI-session time or a deadline.
 | P1 | Kafka integration events and notifications | Phase 9 | 18-26 | Done: `872d073`, CI green |
 | P2 | Focused failure and recovery demonstrations | Selected phase 11 work | 10-16 | Done: `272155e`, CI green |
 | P3 | Essential metrics, dashboard, alerts, and runbook | Reduced phase 12 | 10-16 | Done: `55114a9`, CI green |
-| P4 | Essential security hardening and CI checks | Reduced phase 13 | 8-12 | Local verification passed; CI pending |
-| P5 | Measured load and stock-contention evidence | Reduced phase 16 | 12-20 | Not started |
+| P4 | Essential security hardening and CI checks | Reduced phase 13 | 8-12 | Done: `50f7629`, CI green |
+| P5 | Measured load and stock-contention evidence | Reduced phase 16 | 12-20 | Local verification passed; CI pending |
 | P6 | Reproducible demo and portfolio presentation | Selected phase 18 work | 6-10 | Not started |
 | Total | Portfolio milestone | | 64-100 | |
 
@@ -454,10 +454,64 @@ scanner automatically. Dependency/image reports are retained for seven days;
 secret reports are private temporary files and are not uploaded. A passing scan
 is evidence for its advisory database snapshot, not a permanent security claim.
 
+## P5 implementation design
+
+Use k6 for measured HTTP traffic, with separate catalogue and checkout-contention
+scenarios. A run owns a unique SKU and idempotency-key prefix. Setup work and
+authentication are excluded from the reported scenario latency/rate. Tokens stay
+in the load generator's memory; published results contain only aggregate metrics,
+fixture identifiers, environment details, and invariant outcomes.
+
+The normal scenario generates a bounded constant arrival rate of catalogue list
+and detail reads. The contention scenario prepares distinct quotes before the
+measured run, then places one order per buyer concurrently and retries each with
+the same byte-identical body/key. It classifies HTTP acceptance, throttling,
+unexpected responses, payment-ready orders, and stock rejections separately.
+An accepted HTTP 202 is not counted as a completed order outcome. Each accepted
+order must reach AWAITING_PAYMENT or REJECTED within a bounded polling window.
+
+The first discriminating run is deliberately small. Once it works, increase only
+within the local machine's resource budget and record the actual settings. For
+the contention fixture, require exactly as many held one-unit orders as the SKU
+has units, all other orders rejected for stock, identical idempotent responses,
+and warehouse availability zero. A read-only database audit checks stock,
+reservation, movement, order, and replay-row invariants for the run's SKU.
+
+Keep P4 rate limits enabled and report their effective values. Unexpected 429s,
+timeouts, incorrect outcomes, missing report data, and dropped scheduled work
+fail the evidence gate rather than being removed from latency statistics. The
+benchmark uses the local payment adapter and does not measure successful payment
+or carrier processing, a 100,000-user flash sale, or cloud capacity. Existing
+deterministic last-unit race tests remain the correctness backstop.
+
+The runner records physical host/Docker resources, runtime JVM and database
+versions, application image IDs, memory limits, worker concurrency, rate-limit
+settings, fixture size, harness hashes, and point-in-time resource snapshots.
+The k6 process is bounded to one CPU and 256 MiB. Scenario elapsed time excludes
+setup/teardown; the raw k6 overall duration is retained separately. Contention
+uses distinct quotes/orders split across the two local demo customers, not a
+claim of a large independent-customer population. The runner resets only their
+demo carts and leaves each unique fixture's records for audit and normal expiry.
+
+CI executes small browse and contention runs to detect harness and correctness
+regressions. CI timings are not substituted for the separately recorded local
+60-second observations. Missing samples, failed checks, wrong quotas/outcomes,
+unresolved orders, and inconsistent SQL audits fail the report policy.
+
+Measured commands, environment, full reports, correctness audits, and the retained
+slower contention tail are in [portfolio-performance.md](portfolio-performance.md).
+Only short smoke profiles run in CI; local measurements remain identified by
+their timestamps, image IDs, and harness hashes.
+
 ## Evidence log
 
 | Date | Slice | Evidence | Result |
 |---|---|---|---|
+| 2026-10-14 | P5 workload gates | Short browse/contention smoke runs, validator negative tests, and four archived report sets with environment snapshots and SQL audits | Passed; no failed checks, throttling, or missing outcomes |
+| 2026-10-14 | P5 measured reads | Two 60-second runs: 20.03 and 40.03 requests/s; p95 6.02 and 4.25 ms; 1,202 and 2,402 measured requests | Passed; small warm local dataset, not maximum capacity |
+| 2026-10-14 | P5 measured contention | 24 orders for five units: 5 held/19 rejected; 24 for one unit: 1 held/23 rejected; 24 exact replays per run and all SQL invariants valid | Passed; slower five-unit placement p95 of 1,608.26 ms retained |
+| 2026-10-14 | P5 regression gate | `./gradlew build` successful with unchanged Java tests up to date; source/report secret scan has no findings; original roadmap and failure analysis unchanged | Passed; fresh full build and load smoke pending CI |
+| 2026-10-14 | P4 CI | Commit `50f7629`; [GitHub Actions run 38603577647](https://github.com/Deepika-1201/ecommerce-order-system/actions/runs/38603577647) | Build/security gates, portfolio container, and real-gateway ecosystem passed; P4 complete |
 | 2026-10-14 | Planning | Separate scope, estimates, acceptance criteria, and deferred work recorded | P1 started; implementation not yet verified |
 | 2026-10-14 | P1 core | Full local `./gradlew build`; 956 tests including producer contracts, inbox rollback, SMTP failures, and real-broker DLT failures | Passed; compose demonstration and CI pending |
 | 2026-10-14 | P1 demo | Container image built; portfolio compose stack healthy; `bash scripts/demo-events.sh` completed placement/replay/cancellation, stock hints, and two Mailpit emails | Passed; CI pending |

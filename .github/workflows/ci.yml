@@ -102,6 +102,18 @@ jobs:
         run: docker compose up --detach --no-deps --wait --wait-timeout 120 prometheus grafana
       - name: Portfolio P3 demo (live metrics, correlated order logs, dashboard, and alert rules)
         run: bash scripts/demo-observability.sh
+      - name: Portfolio P5 load smoke (report integrity and stock contention)
+        run: |
+          DURATION_SECONDS=5 RATE=2 VUS=2 bash scripts/run-load.sh browse
+          BUYERS=8 STOCK=2 bash scripts/run-load.sh contention
+      - name: Upload load-test evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: portfolio-load-evidence
+          path: build/reports/load
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Install pinned image scanner
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567
         with:

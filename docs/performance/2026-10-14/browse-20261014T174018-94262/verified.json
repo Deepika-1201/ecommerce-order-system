@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "run_id": "browse-20261014T174018-94262",
+  "workload": "browse",
+  "passed": true,
+  "configuration": {
+    "iteration_rate": 20,
+    "requests_per_iteration": 2,
+    "duration_seconds": 60,
+    "vus": 8
+  },
+  "scenario_duration_seconds": 60.006,
+  "measured_http_requests": 2402,
+  "measured_http_requests_per_second": 40.029330400293304,
+  "unexpected_responses": 0,
+  "throttled_responses": 0,
+  "http_latency_ms": {
+    "med": 2.00171,
+    "p(95)": 4.252916649999997,
+    "p(99)": 9.80576719,
+    "max": 54.757596
+  }
+}

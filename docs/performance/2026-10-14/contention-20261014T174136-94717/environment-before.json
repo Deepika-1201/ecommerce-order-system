@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-10-14T17:41:39.830Z",
+  "source_commit": "50f762909b31c40d7457ef5dee114b9db47e05e2",
+  "worktree_dirty": true,
+  "harness_sha256": {
+    "portfolio.js": "e6c005e0e35ab6736cc28de9cbd24e4decff0af1ffbd8ae0705377b6cb6a6679",
+    "audit.sql": "b169b703205f6c4b7b55f5cd8e99f3bbf61dd13c35badf7ddb8fa37913260038",
+    "report.mjs": "f45c0db76812f672647301bc516727a37f2223db18c248ceca1e88177995e11d",
+    "environment.mjs": "6f66cd888ab74dbad3365a8eb241248dd82f28d51624267cfbf2f3653ccc1b62"
+  },
+  "host": {
+    "platform": "darwin",
+    "architecture": "arm64",
+    "release": "22.5.0",
+    "cpu_model": "Apple M2",
+    "logical_cpus": 8,
+    "memory_bytes": 8589934592,
+    "load_average": [
+      2.322265625,
+      2.1806640625,
+      2.24755859375
+    ]
+  },
+  "docker": {
+    "version": "29.5.2",
+    "operating_system": "Ubuntu 24.04.4 LTS",
+    "architecture": "aarch64",
+    "cpus": 4,
+    "memory_bytes": 4095578112
+  },
+  "java": [
+    "openjdk version \"25.0.4.1\" 2026-08-18 LTS",
+    "OpenJDK Runtime Environment Temurin-25.0.4.1+1 (build 25.0.4.1+1-LTS)",
+    "OpenJDK 64-Bit Server VM Temurin-25.0.4.1+1 (build 25.0.4.1+1-LTS, mixed mode, sharing)"
+  ],
+  "database": {
+    "version": "17.11 (Debian 17.11-1.pgdg13+2)",
+    "catalog_products": 31,
+    "orders": 65
+  },
+  "application": {
+    "roles": "api,worker",
+    "events_enabled": "true",
+    "payment_adapter": "local fake",
+    "database_pool_limit": 20,
+    "dispatcher_concurrency": 4,
+    "task_concurrency": 4,
+    "java_memory_options": [
+      "-XX:MaxRAMPercentage=75",
+      "-XX:+ExitOnOutOfMemoryError"
+    ],
+    "quotas": {
+      "enabled": "true",
+      "ip_per_minute": 3000,
+      "principal_writes_per_minute": 120,
+      "webhook_ip_per_minute": 6000,
+      "instance_per_minute": 20000,
+      "max_keys": 10000
+    }
+  },
+  "containers": {
+    "app": {
+      "image": "ecommerce-order-system-app",
+      "image_id": "sha256:80a3564d0db364bd0579babf1cb08c0ebc4423356547dedc63638c14ece275cb",
+      "memory_limit_bytes": 805306368,
+      "nano_cpus": 0,
+      "user": "app"
+    },
+    "postgres": {
+      "image": "postgres:17",
+      "image_id": "sha256:d74eeac9a635390a49bc21bd49fccd973de707e2a53a76ac49b552b8712ec46f",
+      "memory_limit_bytes": 402653184,
+      "nano_cpus": 0,
+      "user": ""
+    },
+    "kafka": {
+      "image": "apache/kafka:4.3.1",
+      "image_id": "sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837",
+      "memory_limit_bytes": 671088640,
+      "nano_cpus": 0,
+      "user": "appuser"
+    },
+    "keycloak": {
+      "image": "quay.io/keycloak/keycloak:26.8.0",
+      "image_id": "sha256:b0f60d489d51c5d113390bdf5461d4c06e6051be026c05549f2e1e10ec352bcc",
+      "memory_limit_bytes": 805306368,
+      "nano_cpus": 0,
+      "user": "1000"
+    },
+    "s3proxy": {
+      "image": "andrewgaul/s3proxy:4.1.1",
+      "image_id": "sha256:87662b2a5afcdfa5f478a1c61650bae4c87bbd15f6ff2823236bcfd66ef7fe04",
+      "memory_limit_bytes": 268435456,
+      "nano_cpus": 0,
+      "user": ""
+    },
+    "mailpit": {
+      "image": "axllent/mailpit:v1.31.5",
+      "image_id": "sha256:94f6b70c1436defae6799d9ac7ff0eeff9540465b842026d5cdb018f1c0234ea",
+      "memory_limit_bytes": 83886080,
+      "nano_cpus": 0,
+      "user": ""
+    },
+    "prometheus": {
+      "image": "prom/prometheus:v3.15.0",
+      "image_id": "sha256:efd719c99d83b060d9daefdcf00360461adf279f45ef5391f8d111892118753e",
+      "memory_limit_bytes": 268435456,
+      "nano_cpus": 0,
+      "user": "nobody"
+    },
+    "grafana": {
+      "image": "grafana/grafana:13.2.4",
+      "image_id": "sha256:dbbc38ea21103cefb50396340cd88afec779c7e070b0a7bf5a75b4ce46651d3f",
+      "memory_limit_bytes": 536870912,
+      "nano_cpus": 0,
+      "user": "472"
+    }
+  },
+  "resource_snapshot": [
+    {
+      "name": "ecommerce-order-system-app-1",
+      "cpu_percent": "1.94%",
+      "memory": "428MiB / 768MiB",
+      "network_io": "27MB / 155MB",
+      "block_io": "27.5MB / 1.87MB"
+    },
+    {
+      "name": "ecommerce-order-system-postgres-1",
+      "cpu_percent": "0.90%",
+      "memory": "92.79MiB / 384MiB",
+      "network_io": "281MB / 66.4MB",
+      "block_io": "45.4MB / 102MB"
+    },
+    {
+      "name": "ecommerce-order-system-kafka-1",
+      "cpu_percent": "1.90%",
+      "memory": "336.8MiB / 640MiB",
+      "network_io": "9.26MB / 8.39MB",
+      "block_io": "136MB / 183MB"
+    },
+    {
+      "name": "ecommerce-order-system-keycloak-1",
+      "cpu_percent": "0.23%",
+      "memory": "581.8MiB / 768MiB",
+      "network_io": "45.6kB / 119kB",
+      "block_io": "322MB / 188MB"
+    },
+    {
+      "name": "ecommerce-order-system-s3proxy-1",
+      "cpu_percent": "1.37%",
+      "memory": "164.4MiB / 256MiB",
+      "network_io": "10kB / 2.62kB",
+      "block_io": "79.4MB / 1.36MB"
+    },
+    {
+      "name": "ecommerce-order-system-mailpit-1",
+      "cpu_percent": "0.00%",
+      "memory": "14.64MiB / 80MiB",
+      "network_io": "112kB / 99kB",
+      "block_io": "9.5MB / 4.95MB"
+    },
+    {
+      "name": "ecommerce-order-system-prometheus-1",
+      "cpu_percent": "1.27%",
+      "memory": "73MiB / 256MiB",
+      "network_io": "163MB / 1.81MB",
+      "block_io": "77MB / 9.7MB"
+    },
+    {
+      "name": "ecommerce-order-system-grafana-1",
+      "cpu_percent": "0.78%",
+      "memory": "292.8MiB / 512MiB",
+      "network_io": "724kB / 11.7MB",
+      "block_io": "616MB / 6.68MB"
+    }
+  ],
+  "other_running_containers": 1
+}
