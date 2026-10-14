@@ -23,8 +23,8 @@ documentation, and CI. They are not elapsed AI-session time or a deadline.
 | P2 | Focused failure and recovery demonstrations | Selected phase 11 work | 10-16 | Done: `272155e`, CI green |
 | P3 | Essential metrics, dashboard, alerts, and runbook | Reduced phase 12 | 10-16 | Done: `55114a9`, CI green |
 | P4 | Essential security hardening and CI checks | Reduced phase 13 | 8-12 | Done: `50f7629`, CI green |
-| P5 | Measured load and stock-contention evidence | Reduced phase 16 | 12-20 | Local verification passed; CI pending |
-| P6 | Reproducible demo and portfolio presentation | Selected phase 18 work | 6-10 | Not started |
+| P5 | Measured load and stock-contention evidence | Reduced phase 16 | 12-20 | Done: `163b14a`, CI green |
+| P6 | Reproducible demo and portfolio presentation | Selected phase 18 work | 6-10 | Local verification passed; CI pending |
 | Total | Portfolio milestone | | 64-100 | |
 
 ### P1: Kafka events and notifications
@@ -503,10 +503,52 @@ slower contention tail are in [portfolio-performance.md](portfolio-performance.m
 Only short smoke profiles run in CI; local measurements remain identified by
 their timestamps, image IDs, and harness hashes.
 
+## P6 implementation design
+
+Provide one reviewer guide that distinguishes shipped behavior from the full
+roadmap, links each important claim to executable evidence, and gives a short
+walkthrough using the existing demos. Correct stale README claims instead of
+rewriting the original roadmap. A recording or transcript must come from a real
+run and must not expose bearer tokens or real customer data.
+
+Verify the walkthrough from a clean Git checkout with a distinct compose project
+and newly created data volumes. Reuse neither the current checkout's generated
+files nor its populated database. Build caches may be reused and must be reported
+as such. Preserve existing project volumes and unrelated containers; on the small
+local VM, temporarily stop only this project's running services if needed, then
+restore them after the isolated rehearsal. Record the exact source commit,
+commands, image, results, and any machine-specific workaround. CI remains a
+separate fresh-runner verification of the public source and demos.
+
+## Running P6
+
+Start with [the reviewer guide](portfolio-guide.md), which links the architecture,
+decisions, named tests, measured reports, security scope, and operational limits.
+With the portfolio/observability stack already running:
+
+```sh
+bash scripts/demo-portfolio.sh
+node scripts/check-portfolio.mjs
+```
+
+The [real terminal recording](recordings/2026-10-15/walkthrough.cast),
+[derived transcript](recordings/2026-10-15/transcript.txt), and
+[clean-checkout evidence](recordings/2026-10-15/fresh-checkout.json) come from public
+commit `163b14a` with new compose volumes. The recording runs the two existing
+demo scripts that the wrapper composes; CI now tests the wrapper itself.
+Recording integrity and reviewer links are checked in CI. This is a terminal
+demonstration, not a narrated video or a recording of browser dashboards.
+
 ## Evidence log
 
 | Date | Slice | Evidence | Result |
 |---|---|---|---|
+| 2026-10-15 | P6 reviewer path | Corrected README scope, reviewer guide, and `bash scripts/demo-portfolio.sh` against the existing portfolio stack | Passed; original roadmap unchanged |
+| 2026-10-15 | P6 clean clone | Fresh public `163b14a` clone, clean before/after, distinct compose project and new volumes; products/orders/notifications began at 0/0/0 and ended at 2/3/6 | Both existing demos passed; Docker/build caches reused |
+| 2026-10-15 | P6 recording | Actual 41.1-second asciicast, derived transcript, SHA-256 and timestamp checks, 113 local reviewer links, no recognized secret findings | Passed; not a narrated/browser video |
+| 2026-10-15 | P6 recovery | First attempt in an unshared macOS temporary directory could not bind configuration files; retry in Docker-shared home succeeded; original container IDs and data-volume names verified after both restorations | No existing volumes deleted; unrelated ride-hailing database stayed running |
+| 2026-10-15 | P6 regression gate | `./gradlew build` successful with unchanged Java tests up to date; walkthrough and evidence validator freshly executed | Passed; fresh full build, security scans, and wrapper verification pending CI |
+| 2026-10-15 | P5 CI | Commit `163b14a`; [GitHub Actions run 38610362785](https://github.com/Deepika-1201/ecommerce-order-system/actions/runs/38610362785) | Build/security gates, load smoke, portfolio demo, and real-gateway regressions passed; P5 complete |
 | 2026-10-14 | P5 workload gates | Short browse/contention smoke runs, validator negative tests, and four archived report sets with environment snapshots and SQL audits | Passed; no failed checks, throttling, or missing outcomes |
 | 2026-10-14 | P5 measured reads | Two 60-second runs: 20.03 and 40.03 requests/s; p95 6.02 and 4.25 ms; 1,202 and 2,402 measured requests | Passed; small warm local dataset, not maximum capacity |
 | 2026-10-14 | P5 measured contention | 24 orders for five units: 5 held/19 rejected; 24 for one unit: 1 held/23 rejected; 24 exact replays per run and all SQL invariants valid | Passed; slower five-unit placement p95 of 1,608.26 ms retained |

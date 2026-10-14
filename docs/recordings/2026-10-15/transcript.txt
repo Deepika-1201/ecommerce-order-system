@@ -1,0 +1,56 @@
+
+== Tokens for ravi, admin, and the warehouse
+
+== Create a product and consume its received-stock event
+Catalog hint: IN_STOCK
+
+== Prepare a customer cart and an existing or new Karnataka address
+
+== Place and replay one order; Kafka updates the availability hint
+Order 01a13bc9-a941-759a-910d-357cc6310138 awaiting payment; catalog hint: SOLD_OUT
+
+== Cancel the order; the stock event restores the hint
+Order CANCELLED; catalog hint: IN_STOCK
+
+== Verify the two captured emails without sending anything outside Mailpit
+
+Demo passed. Order: 01a13bc9-a941-759a-910d-357cc6310138. Mailpit: http://localhost:8025
+
+== Management-only metrics and a healthy Prometheus target
+
+== Exercise placement, cancellation, and an out-of-stock rejection
+
+== Tokens for asha and ravi (customers), admin, meera (warehouse) and sunita (support)
+five tokens
+
+== Admin: a kettle at Rs 1,499, SKU KETTLE-1792004442; meera receives 2 units
+2 on hand
+
+== asha: a Karnataka address, 1 kettle in her cart, a quote and an order
+order EC000000002, PLACED: Rs 1,499, GST included
+
+== asha: the same request with the same key returns the same order; ravi cannot see it
+one order per quote; another customer's order is not found
+
+== The order process reserves the unit and sets up the payment
+AWAITING_PAYMENT; pay at https://fake-gateway.invalid/checkout/cs_0fdd21902280410bb3c461d0d4a38984
+meera sees 1 unit reserved
+
+== asha cancels: the payment is cancelled and the unit is available again
+accepted: CANCELLING
+CANCELLED (CUSTOMER); 2 available
+
+== asha orders 3 kettles: there are 2, so the order is rejected, naming the SKU
+REJECTED (OUT_OF_STOCK, KETTLE-1792004442); nothing held
+
+== sunita (support) reads it with its customer; asha cannot use support's path
+customer 01a13bc9-cc8d-75e3-a98d-8273ccc8100b
+the deleted address stays on the order, as a snapshot
+
+Demo passed.
+
+== Observe durable state, queue age, and HTTP traffic through Prometheus
+
+== Verify the provisioned dashboard and loaded operational rules
+
+Observability demo passed. Dashboard: http://localhost:3001/d/ecommerce-operations

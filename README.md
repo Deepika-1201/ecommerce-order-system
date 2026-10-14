@@ -1,16 +1,18 @@
 # E-Commerce Order System
 
-The order-management backend of a direct-to-consumer store in India, built as an event-driven distributed system. It covers an order saga with compensation, inventory reservation that never oversells (including in a flash sale), a transactional outbox feeding broker events, and eventual consistency that customers can see.
+The order-management backend of a direct-to-consumer store in India, built as an event-driven modular monolith with Java 25, Spring Boot, PostgreSQL, and Kafka. It demonstrates an order saga with compensation, stock reservations tested under contention, a transactional outbox, idempotent consumers, and observable eventual consistency.
 
 It is one of four independent systems that integrate only through published contracts:
 
 | System | Role for this system |
 |---|---|
 | [Payment-Orchestrator](https://github.com/Deepika-1201/Payment-Orchestrator) | Payment gateway. This system is one of its merchants: merchant API, hosted checkout, signed webhooks |
-| [distributed-job-scheduler](https://github.com/Deepika-1201/distributed-job-scheduler) | Runs this system's deadlines, retried calls and recurring jobs |
+| [distributed-job-scheduler](https://github.com/Deepika-1201/distributed-job-scheduler) | Planned integration; the portfolio currently uses its own durable in-process task scheduler |
 | [ride-hailing-platform](https://github.com/Deepika-1201/ride-hailing-platform) | Separate system in the same ecosystem; no direct integration |
 
-> **Status:** Phases 1 (scaffolding), 2 (platform: transactional outbox, dispatcher, Kafka relay, task scheduler, idempotency keys, audit log), 3 (catalog and customers: OIDC resource server, catalog with search and pre-signed image uploads, customer profiles and addresses, OpenAPI document), 4 (cart and pricing: guest and customer carts with merge at sign-in, quotes with GST and shipping, coupons with redemption limits), 5 (inventory: reservations that never oversell, hold expiry with on-demand reclaim, warehouse receipts and adjustments with a movement ledger), 6 (ordering: orders placed from a quote with an Idempotency-Key, the order saga across Inventory, Pricing and, as simulators until phases 7 and 8, Payments and Fulfillment, with compensation, late and duplicate replies, cancellation by customers and support, and deadlines), 7 (payments: the gateway adapter with contract tests against its OpenAPI document, hosted checkout, signed webhooks into an inbox, status polls, refunds and late successes, end to end against the real Payment Gateway) and 8 (fulfillment: shipments booked through a carrier port within a 24-hour budget, the warehouse's packed and handed-over marks, signed tracking webhooks applied only if newer and reachable so tracking never moves backwards, return to origin restocked and refunded, against a carrier simulator with PIN-code scenarios) are done. Phase 9 (events and notifications: integration events on Kafka, event schemas with compatibility tests, the notifications consumer with a dead-letter topic, Mailpit) is next. The design (requirements, HLD, saga, consistency and failure analysis, ADR-001 to ADR-014) was approved on 2026-10-02.
+> **Delivered:** catalogue, customers, carts, GST-inclusive pricing, inventory, ordering, payments, fulfillment, Kafka integration events, notifications, failure-recovery evidence, operational visibility, security gates, and bounded load tests. Start with the [portfolio guide](docs/portfolio-guide.md) or [recorded walkthrough transcript](docs/recordings/2026-10-15/transcript.txt). The [portfolio milestone](docs/portfolio-milestone.md) tracks its own evidence; the original [full roadmap](docs/implementation-plan.md) is preserved separately.
+
+This is a backend portfolio, not a storefront or production deployment. The local default uses a fake payment adapter and a carrier simulator; an optional stack tests the real Payment Gateway against its mock PSPs. Service extraction, external scheduler integration, cloud deployment, distributed tracing/paging, and the 100,000-user flash-sale target remain future work.
 
 ## Portfolio milestone
 
@@ -54,6 +56,10 @@ invariant audits. Run `bash scripts/run-load.sh browse` or
 `bash scripts/run-load.sh contention` against the local portfolio stack.
 [docs/portfolio-performance.md](docs/portfolio-performance.md) contains measured
 results, raw reports, exact reproduction commands, and their limitations.
+
+For the single reviewer walkthrough, start the observability stack above and run
+`bash scripts/demo-portfolio.sh`. Its clean-checkout rehearsal and real terminal
+recording are linked from [docs/portfolio-guide.md](docs/portfolio-guide.md).
 
 ## Quick start
 

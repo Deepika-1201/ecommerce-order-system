@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "source_commit": "163b14a9ff6ff1cfe45ed47ba5b06b4a922b1db3",
+  "source": "Fresh public GitHub clone, no copied workspace files",
+  "project": "ecommerce-p6-1792004373273",
+  "started_at": "2026-10-14T18:59:35.072Z",
+  "completed_at": "2026-10-14T19:01:13.703Z",
+  "checkout_clean_before_and_after": true,
+  "data_volumes_initially_absent": true,
+  "before": {
+    "catalog_products": 0,
+    "orders": 0,
+    "notifications": 0
+  },
+  "after": {
+    "catalog_products": 2,
+    "orders": 3,
+    "notifications": 6
+  },
+  "image_id": "sha256:95d30c5d686b028ecfe0183fdad74ae7fcb73e22fa7f5abafab109f11ab84260",
+  "recording": {
+    "format": "asciicast v2",
+    "duration_seconds": 41.115564,
+    "sha256": "7df8745e9498a084fd690cefc26f985c64e607af0de0f64005a3e1cc08749acc",
+    "commands": [
+      "bash scripts/demo-events.sh",
+      "bash scripts/demo-observability.sh"
+    ]
+  },
+  "notes": [
+    "Image and Gradle caches were reusable; this was not a cold-network benchmark.",
+    "The existing Mac network workaround supplied alternate GitHub release-asset IPs to docker build.",
+    "Synthetic local users and a fake payment adapter; no PSP payment or real email was sent."
+  ]
+}
