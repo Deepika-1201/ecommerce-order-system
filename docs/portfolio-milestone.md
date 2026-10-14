@@ -19,8 +19,8 @@ documentation, and CI. They are not elapsed AI-session time or a deadline.
 
 | ID | Work | Full-plan reference | Estimated hours | Status |
 |---|---|---|---|---|
-| P1 | Kafka integration events and notifications | Phase 9 | 18-26 | Local verification passed; CI pending |
-| P2 | Focused failure and recovery demonstrations | Selected phase 11 work | 10-16 | Not started |
+| P1 | Kafka integration events and notifications | Phase 9 | 18-26 | Done: `872d073`, CI green |
+| P2 | Focused failure and recovery demonstrations | Selected phase 11 work | 10-16 | Local verification passed; CI pending |
 | P3 | Essential metrics, dashboard, alerts, and runbook | Reduced phase 12 | 10-16 | Not started |
 | P4 | Essential security hardening and CI checks | Reduced phase 13 | 8-12 | Not started |
 | P5 | Measured load and stock-contention evidence | Reduced phase 16 | 12-20 | Not started |
@@ -245,6 +245,88 @@ SMTP guarantee.
   publication failure itself must be fixed at the broker; its source offset
   remains uncommitted and the listener retries recovery automatically.
 
+## P2 implementation design
+
+Reuse the existing failure tests rather than duplicating the saga suite. The
+first additional check stops and restarts the same embedded Kafka broker: two
+events for one aggregate must stay pending during the outage, then arrive with
+their original message IDs in sequence. The source remains the real transactional
+outbox and the relay is the production bean. Test-only shortened Kafka timeouts
+bound the outage. A `finally` block restarts the broker even when an assertion
+fails. This demonstrates single-broker recovery, not replica failover or quorum
+durability.
+
+A second check uses the production notification listener with a real record and
+an acknowledgement that fails after the inbox transaction returns. Closing that
+consumer without committing and recreating it with the same group must redeliver
+the same offset, while preserving the original notification and send-task IDs.
+This is an injected failure at the commit/acknowledgement boundary, not a claim
+that the test terminates a JVM process.
+
+A third check makes task insertion fail until the real listener exhausts its
+transient retries and writes the valid record to the DLT. No inbox, progress, or
+notification effect may survive the rollback. Removing the fault and replaying
+the original key/value must create one durable effect, including when an operator
+repeats the replay. Existing notification tests cover SMTP retry separately.
+A named evidence matrix will distinguish existing regression coverage, new fault
+demonstrations, and deferred scenarios. The full S1-S20 phase remains separate
+from this focused milestone.
+
+## Running P2
+
+JDK 25 is required. Tests launch their own embedded PostgreSQL and Kafka; no
+Docker stack or sibling repository is needed, and no running broker is stopped.
+
+```sh
+./gradlew portfolioFailureTest
+```
+
+The command always executes the selected tests rather than reporting an
+up-to-date result. The HTML report is generated at
+`build/reports/tests/portfolioFailureTest/index.html`, with JUnit XML under
+`build/test-results/portfolioFailureTest`. The normal `./gradlew build` also
+includes every selected test, so CI checks the same guarantees without a second
+duplicate test job.
+
+### Failure evidence matrix
+
+The scenario IDs refer to the unchanged [full failure analysis](failure-handling.md).
+Class links below identify the executable evidence; this is a selected matrix,
+not a certification that every operational form of S1-S20 has been tested.
+
+| Scenario | Executable evidence | Boundary verified |
+|---|---|---|
+| S1/S2: no stock or failed payment | [OrderFlowTests](../src/test/java/com/ecommerce/ordering/OrderFlowTests.java) | Rejected/cancelled orders release their reservations and coupon effects |
+| S4/S5: duplicate participant replies or reservations | [LateReplyTests](../src/test/java/com/ecommerce/ordering/LateReplyTests.java), [StockReservationTests](../src/test/java/com/ecommerce/inventory/StockReservationTests.java) | Repeated inputs do not repeat saga or stock effects |
+| S6: cancellation overlaps payment | [CancellationTests](../src/test/java/com/ecommerce/ordering/CancellationTests.java) | Cancellation/payment orderings compensate correctly; a shipped order is not silently cancelled |
+| S7: last-unit contention | [LastUnitTests](../src/test/java/com/ecommerce/inventory/LastUnitTests.java), `exactlyOneOfEightOrdersGetsTheLastUnit` | Eight callers queued behind the same row lock produce one holder and seven rejections |
+| S9: unavailable broker | [KafkaUnavailableTests](../src/test/java/com/ecommerce/platform/messaging/KafkaUnavailableTests.java) | Relay backoff retains events and never parks them at the internal-handler attempt limit |
+| S9: broker recovery | [KafkaRelayTests](../src/test/java/com/ecommerce/platform/messaging/KafkaRelayTests.java), `aBrokerOutageBuffersEventsAndRecoveryDeliversTheOriginalIdsInOrder` | A real broker stop/restart preserves event IDs and per-key order through catch-up |
+| Relay send/commit failure | [KafkaRelayTests](../src/test/java/com/ecommerce/platform/messaging/KafkaRelayTests.java), `aCrashBetweenSendingAndCommittingSendsTheSameMessageAgain` | Failing the database update after a broker send redelivers the same message ID |
+| S11: consumer commit/acknowledgement failure | [NotificationKafkaTests](../src/test/java/com/ecommerce/notifications/domain/NotificationKafkaTests.java), `aConsumerRestartAfterDatabaseCommitBeforeAcknowledgementDoesNotRepeatTheEffect` | A fresh consumer redelivers an uncommitted offset without replacing the original notification or task |
+| Transaction rollback and retry | [IntegrationInboxTests](../src/test/java/com/ecommerce/platform/messaging/IntegrationInboxTests.java), [DispatcherTests](../src/test/java/com/ecommerce/platform/messaging/DispatcherTests.java) | Inbox markers and database effects roll back together; a retry can apply them |
+| Poison message and unavailable DLT | [NotificationKafkaTests](../src/test/java/com/ecommerce/notifications/domain/NotificationKafkaTests.java) | Original binary keys/values survive recovery; failed DLT publication does not advance the source offset |
+| Repair and operator replay | [NotificationKafkaTests](../src/test/java/com/ecommerce/notifications/domain/NotificationKafkaTests.java), `aFailedDatabaseEffectCanBeReplayedFromDeadLettersAfterRepair` | Failed effects leave no rows; replaying the valid DLT record twice after repair creates one notification/task |
+| S12: stale stock or order event | [AvailabilityHintTests](../src/test/java/com/ecommerce/catalog/AvailabilityHintTests.java), [NotificationTests](../src/test/java/com/ecommerce/notifications/domain/NotificationTests.java) | Older sequences cannot regress the stock projection or enqueue a misleading earlier milestone |
+| S17: repeated checkout | [PlacementTests](../src/test/java/com/ecommerce/ordering/PlacementTests.java), `theSameKeyReplaysTheOrderAndAnotherRequestWithItIsRefused` | Same-key/same-body placement replays; key reuse for another body is refused |
+| S18: refund failure | [RefundTests](../src/test/java/com/ecommerce/ordering/RefundTests.java) | Refund failure is recorded and alerted instead of represented as success |
+| S20: task lease expiry | [TaskSchedulerTests](../src/test/java/com/ecommerce/platform/tasks/TaskSchedulerTests.java) | Expired work is reclaimed; the worker with the old lease cannot overwrite the result |
+| SMTP unavailable | [NotificationTests](../src/test/java/com/ecommerce/notifications/domain/NotificationTests.java) | Email failure leaves work retryable outside consumption; exhaustion is explicit FAILED state |
+| Event-storage failure | [OrderIntegrationEventTests](../src/test/java/com/ecommerce/ordering/OrderIntegrationEventTests.java) | Failed outbox storage rolls back order placement and its commands |
+
+### Limits of this evidence
+
+- Broker recovery uses one real embedded broker, not replicated-broker failover,
+  network partition tolerance, or quorum durability.
+- Consumer crash windows are injected at transaction/acknowledgement boundaries;
+  these checks do not forcibly terminate the application JVM or PostgreSQL.
+- Payment and carrier behavior in the selected Java suites uses their existing
+  test adapters. Real-gateway compose demos remain separate CI evidence from P1.
+- SMTP retry uses a failing delivery adapter. Mailpit's happy-path delivery is
+  separate evidence; neither makes external email delivery exactly once.
+- Live database outages, real scheduler recovery, flash-sale overload, and cloud
+  disaster recovery remain outside this portfolio subset of the full plan.
+
 ## Evidence log
 
 | Date | Slice | Evidence | Result |
@@ -252,3 +334,6 @@ SMTP guarantee.
 | 2026-10-14 | Planning | Separate scope, estimates, acceptance criteria, and deferred work recorded | P1 started; implementation not yet verified |
 | 2026-10-14 | P1 core | Full local `./gradlew build`; 956 tests including producer contracts, inbox rollback, SMTP failures, and real-broker DLT failures | Passed; compose demonstration and CI pending |
 | 2026-10-14 | P1 demo | Container image built; portfolio compose stack healthy; `bash scripts/demo-events.sh` completed placement/replay/cancellation, stock hints, and two Mailpit emails | Passed; CI pending |
+| 2026-10-14 | P1 CI | Commit `872d073`; [GitHub Actions run 38580017670](https://github.com/Deepika-1201/ecommerce-order-system/actions/runs/38580017670) | Passed; P1 complete |
+| 2026-10-14 | P2 selected evidence | `./gradlew portfolioFailureTest`: 124 tests in 16 suites; JUnit XML confirms all three new fault regressions executed | Passed, none skipped |
+| 2026-10-14 | P2 regression gate | `./gradlew build`: 959 tests in 101 suites; original phase plan and failure analysis verified byte-identical to the phase 8 baseline | Passed, none skipped; CI pending |

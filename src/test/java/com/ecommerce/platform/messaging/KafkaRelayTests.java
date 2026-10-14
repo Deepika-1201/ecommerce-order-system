@@ -25,6 +25,7 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.test.EmbeddedKafkaBroker;
+import org.springframework.kafka.test.EmbeddedKafkaKraftBroker;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.kafka.test.utils.KafkaTestUtils;
 import org.springframework.test.annotation.DirtiesContext;
@@ -34,7 +35,13 @@ import tools.jackson.databind.json.JsonMapper;
 /** The Kafka relay against an embedded broker (LLD §2.5). */
 @Import(MessagingFixtures.class)
 @EmbeddedKafka(partitions = 1, topics = MessagingFixtures.TOPIC)
-@TestPropertySource(properties = "spring.kafka.bootstrap-servers=${spring.embedded.kafka.brokers}")
+@TestPropertySource(properties = {
+    "spring.kafka.bootstrap-servers=${spring.embedded.kafka.brokers}",
+    "spring.kafka.producer.properties.max.block.ms=1000",
+    "spring.kafka.producer.properties.request.timeout.ms=1000",
+    "spring.kafka.producer.properties.delivery.timeout.ms=3000",
+    "ecom.messaging.relay-send-timeout=5s"
+})
 @DirtiesContext
 class KafkaRelayTests extends IntegrationTest {
 
@@ -127,7 +134,45 @@ class KafkaRelayTests extends IntegrationTest {
         assertThat(firstNotes).containsExactly(first + "/1", first + "/2");
     }
 
-    /** Makes marking the aggregate's row delivered fail, as a crash after the send and before the commit would. */
+        @Test
+        void aBrokerOutageBuffersEventsAndRecoveryDeliversTheOriginalIdsInOrder() throws Exception {
+        String order = "outage-" + UUID.randomUUID();
+        var cluster = ((EmbeddedKafkaKraftBroker) broker).getCluster();
+        var server = cluster.brokers().values().iterator().next();
+        server.shutdown();
+        server.awaitShutdown();
+        List<String> messageIds;
+        try {
+            publisher.publish(new SomethingPublic("first"), order, 1);
+            publisher.publish(new SomethingPublic("second"), order, 2);
+            messageIds = jdbc.sql("SELECT message_id::text FROM platform.outbox ORDER BY id")
+                .query(String.class).list();
+
+            assertThat(relay.relayBatch()).isEqualTo(1);
+            assertThat(pending()).isEqualTo(2);
+            assertThat(jdbc.sql("SELECT attempts FROM platform.outbox ORDER BY id")
+                .query(Integer.class).list()).containsExactly(1, 0);
+            assertThat(jdbc.sql("SELECT count(*) FROM platform.outbox WHERE parked_at IS NOT NULL")
+                .query(Integer.class).single()).isZero();
+        } finally {
+            server.startup();
+            cluster.waitForReadyBrokers();
+        }
+
+        jdbc.sql("UPDATE platform.outbox SET next_attempt_at = now()").update();
+        assertThat(relay.relayBatch()).isEqualTo(1);
+        assertThat(relay.relayBatch()).isEqualTo(1);
+        assertThat(relay.relayBatch()).isZero();
+
+        List<ConsumerRecord<String, String>> records = receive(Set.of(order), 2);
+        assertThat(records).extracting(record -> json.readTree(record.value()).path("message_id").asString())
+            .containsExactlyElementsOf(messageIds);
+        assertThat(records).extracting(record -> json.readTree(record.value()).path("data").path("note").asString())
+            .containsExactly("first", "second");
+        assertThat(pending()).isZero();
+        }
+
+        /** Makes marking the aggregate's row delivered fail, as a crash after the send and before the commit would. */
     private void failMarkingDelivered(String aggregateId) {
         jdbc.sql("""
                 CREATE OR REPLACE FUNCTION public.test_fail_delivery() RETURNS trigger LANGUAGE plpgsql AS $$

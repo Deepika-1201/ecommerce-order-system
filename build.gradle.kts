@@ -102,6 +102,32 @@ tasks.named<org.springframework.boot.gradle.tasks.run.BootRun>("bootTestRun") {
     mainClass = "com.ecommerce.LocalDevApplication"
 }
 
+tasks.register<Test>("portfolioFailureTest") {
+    description = "Runs the portfolio's selected failure and recovery evidence against PostgreSQL and Kafka."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    filter {
+        includeTestsMatching("com.ecommerce.platform.messaging.KafkaRelayTests")
+        includeTestsMatching("com.ecommerce.platform.messaging.KafkaUnavailableTests")
+        includeTestsMatching("com.ecommerce.platform.messaging.DispatcherTests")
+        includeTestsMatching("com.ecommerce.platform.messaging.IntegrationInboxTests")
+        includeTestsMatching("com.ecommerce.platform.tasks.TaskSchedulerTests")
+        includeTestsMatching("com.ecommerce.notifications.domain.NotificationKafkaTests")
+        includeTestsMatching("com.ecommerce.notifications.domain.NotificationTests")
+        includeTestsMatching("com.ecommerce.catalog.AvailabilityHintTests")
+        includeTestsMatching("com.ecommerce.inventory.LastUnitTests")
+        includeTestsMatching("com.ecommerce.inventory.StockReservationTests")
+        includeTestsMatching("com.ecommerce.ordering.OrderFlowTests")
+        includeTestsMatching("com.ecommerce.ordering.CancellationTests")
+        includeTestsMatching("com.ecommerce.ordering.LateReplyTests")
+        includeTestsMatching("com.ecommerce.ordering.PlacementTests")
+        includeTestsMatching("com.ecommerce.ordering.OrderIntegrationEventTests")
+        includeTestsMatching("com.ecommerce.ordering.RefundTests")
+    }
+    outputs.upToDateWhen { false }
+}
+
 // ADR-016: rewrites docs/api/openapi.json from the code; the build's own test fails while the file is stale.
 tasks.register<Test>("updateOpenApi") {
     description = "Regenerates docs/api/openapi.json from the controllers."
